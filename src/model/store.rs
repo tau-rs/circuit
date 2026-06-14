@@ -4,6 +4,7 @@ use super::{
     config::Config, glossary::Glossary, load_toml, node::DagNode, save_toml, spec::SpecRecord,
     ModelError,
 };
+use crate::session::SessionRecord;
 
 /// The `.circuit/` persistence boundary, rooted at a repo working tree.
 /// All filesystem IO for the authored model lives here.
@@ -107,6 +108,45 @@ impl Workspace {
         }
         Ok(nodes)
     }
+
+    pub fn sessions_dir(&self) -> PathBuf {
+        self.circuit_dir().join("sessions")
+    }
+
+    pub fn session_path(&self, id: &str) -> PathBuf {
+        self.sessions_dir().join(format!("{id}.toml"))
+    }
+
+    pub fn load_session(&self, id: &str) -> Result<SessionRecord, ModelError> {
+        load_toml(&self.session_path(id))
+    }
+
+    pub fn save_session(&self, s: &SessionRecord) -> Result<(), ModelError> {
+        save_toml(&self.session_path(&s.id.to_string()), s)
+    }
+
+    /// All session records, sorted by file path for deterministic order.
+    pub fn list_sessions(&self) -> Result<Vec<SessionRecord>, ModelError> {
+        let dir = self.sessions_dir();
+        let mut sessions = Vec::new();
+        if dir.is_dir() {
+            let mut paths: Vec<PathBuf> = std::fs::read_dir(&dir)
+                .map_err(|source| ModelError::Io {
+                    path: dir.display().to_string(),
+                    source,
+                })?
+                // Best-effort: skip entries we can't stat (the open dir already succeeded).
+                .filter_map(|e| e.ok())
+                .map(|e| e.path())
+                .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("toml"))
+                .collect();
+            paths.sort();
+            for p in paths {
+                sessions.push(load_toml(&p)?);
+            }
+        }
+        Ok(sessions)
+    }
 }
 
 #[cfg(test)]
@@ -149,5 +189,43 @@ mod tests {
         ws.save_dag_node(&DagNode::new("a-slice", "s", "A", "impl/a")).unwrap();
         let ids: Vec<String> = ws.list_dag_nodes().unwrap().into_iter().map(|n| n.id).collect();
         assert_eq!(ids, vec!["a-slice".to_string(), "b-slice".to_string()]);
+    }
+
+    #[test]
+    fn session_round_trips_through_disk() {
+        use crate::session::{SessionId, SessionRecord};
+        let dir = tempfile::tempdir().unwrap();
+        let ws = Workspace::new(dir.path());
+
+        let s = SessionRecord::impl_(
+            SessionId::generate(),
+            "checkout",
+            "auth-slice",
+            "impl/checkout-auth",
+        );
+        ws.save_session(&s).unwrap();
+        assert_eq!(ws.load_session(&s.id.to_string()).unwrap(), s);
+    }
+
+    #[test]
+    fn list_sessions_is_sorted_and_empty_when_absent() {
+        use crate::session::{SessionId, SessionRecord};
+        let dir = tempfile::tempdir().unwrap();
+        let ws = Workspace::new(dir.path());
+        assert!(ws.list_sessions().unwrap().is_empty());
+
+        // Spec sessions exercise the all-`None` options serialization path too.
+        let a = SessionRecord::spec(SessionId::generate());
+        let b = SessionRecord::spec(SessionId::generate());
+        ws.save_session(&a).unwrap();
+        ws.save_session(&b).unwrap();
+
+        let got = ws.list_sessions().unwrap();
+        assert_eq!(got.len(), 2);
+
+        let mut expected_ids = vec![a.id.to_string(), b.id.to_string()];
+        expected_ids.sort();
+        let got_ids: Vec<String> = got.iter().map(|s| s.id.to_string()).collect();
+        assert_eq!(got_ids, expected_ids);
     }
 }
