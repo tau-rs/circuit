@@ -1,0 +1,152 @@
+use std::path::{Path, PathBuf};
+
+use super::{
+    config::Config, glossary::Glossary, load_toml, node::DagNode, save_toml, spec::SpecRecord,
+    ModelError,
+};
+
+/// The `.circuit/` persistence boundary, rooted at a repo working tree.
+/// All filesystem IO for the authored model lives here.
+pub struct Workspace {
+    root: PathBuf,
+}
+
+impl Workspace {
+    pub fn new(root: impl Into<PathBuf>) -> Self {
+        Self { root: root.into() }
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    pub fn circuit_dir(&self) -> PathBuf {
+        self.root.join(".circuit")
+    }
+
+    pub fn config_path(&self) -> PathBuf {
+        self.circuit_dir().join("config.toml")
+    }
+
+    pub fn glossary_path(&self) -> PathBuf {
+        self.circuit_dir().join("glossary.toml")
+    }
+
+    pub fn specs_dir(&self) -> PathBuf {
+        self.circuit_dir().join("specs")
+    }
+
+    pub fn dag_dir(&self) -> PathBuf {
+        self.circuit_dir().join("dag")
+    }
+
+    pub fn spec_path(&self, id: &str) -> PathBuf {
+        self.specs_dir().join(format!("{id}.toml"))
+    }
+
+    pub fn dag_node_path(&self, id: &str) -> PathBuf {
+        self.dag_dir().join(format!("{id}.toml"))
+    }
+
+    /// A workspace is initialized once its config file exists.
+    pub fn is_initialized(&self) -> bool {
+        self.config_path().exists()
+    }
+
+    pub fn load_config(&self) -> Result<Config, ModelError> {
+        load_toml(&self.config_path())
+    }
+
+    pub fn save_config(&self, c: &Config) -> Result<(), ModelError> {
+        save_toml(&self.config_path(), c)
+    }
+
+    pub fn load_glossary(&self) -> Result<Glossary, ModelError> {
+        load_toml(&self.glossary_path())
+    }
+
+    pub fn save_glossary(&self, g: &Glossary) -> Result<(), ModelError> {
+        save_toml(&self.glossary_path(), g)
+    }
+
+    pub fn load_spec(&self, id: &str) -> Result<SpecRecord, ModelError> {
+        load_toml(&self.spec_path(id))
+    }
+
+    pub fn save_spec(&self, s: &SpecRecord) -> Result<(), ModelError> {
+        save_toml(&self.spec_path(&s.id), s)
+    }
+
+    pub fn load_dag_node(&self, id: &str) -> Result<DagNode, ModelError> {
+        load_toml(&self.dag_node_path(id))
+    }
+
+    pub fn save_dag_node(&self, n: &DagNode) -> Result<(), ModelError> {
+        save_toml(&self.dag_node_path(&n.id), n)
+    }
+
+    /// All DAG nodes, sorted by file path for deterministic order.
+    pub fn list_dag_nodes(&self) -> Result<Vec<DagNode>, ModelError> {
+        let dir = self.dag_dir();
+        let mut nodes = Vec::new();
+        if dir.is_dir() {
+            let mut paths: Vec<PathBuf> = std::fs::read_dir(&dir)
+                .map_err(|source| ModelError::Io {
+                    path: dir.display().to_string(),
+                    source,
+                })?
+                .filter_map(|e| e.ok())
+                .map(|e| e.path())
+                .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("toml"))
+                .collect();
+            paths.sort();
+            for p in paths {
+                nodes.push(load_toml(&p)?);
+            }
+        }
+        Ok(nodes)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_round_trips_through_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = Workspace::new(dir.path());
+        assert!(!ws.is_initialized());
+
+        let c = Config::default();
+        ws.save_config(&c).unwrap();
+        assert!(ws.is_initialized());
+        assert_eq!(ws.load_config().unwrap(), c);
+    }
+
+    #[test]
+    fn spec_and_dag_node_round_trip_through_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = Workspace::new(dir.path());
+
+        let s = SpecRecord::new("checkout", "Checkout", "Pay for a basket.");
+        ws.save_spec(&s).unwrap();
+        assert_eq!(ws.load_spec("checkout").unwrap(), s);
+
+        let n = DagNode::new("auth-slice", "checkout", "Auth", "impl/checkout-auth");
+        ws.save_dag_node(&n).unwrap();
+        assert_eq!(ws.load_dag_node("auth-slice").unwrap(), n);
+    }
+
+    #[test]
+    fn list_dag_nodes_returns_sorted_and_empty_when_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = Workspace::new(dir.path());
+        assert!(ws.list_dag_nodes().unwrap().is_empty());
+
+        ws.save_dag_node(&DagNode::new("b-slice", "s", "B", "impl/b")).unwrap();
+        ws.save_dag_node(&DagNode::new("a-slice", "s", "A", "impl/a")).unwrap();
+        let ids: Vec<String> = ws.list_dag_nodes().unwrap().into_iter().map(|n| n.id).collect();
+        assert_eq!(ids, vec!["a-slice".to_string(), "b-slice".to_string()]);
+    }
+}
