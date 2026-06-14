@@ -69,7 +69,7 @@ mod tests {
     use super::*;
     use crate::flow::facts::BranchFacts;
     use crate::ports::{GitPort, Worktree};
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use std::path::{Path as StdPath, PathBuf};
 
     fn write(dir: &Path, rel: &str, body: &str) {
@@ -88,21 +88,31 @@ mod tests {
     impl std::error::Error for FakeError {}
 
     /// Configurable fake: a list of worktrees, a branch->merged map for facts,
-    /// and a switch to force `branch_facts` to error.
+    /// a switch to force all `branch_facts` calls to error, and a per-branch
+    /// error set for more fine-grained control.
     struct FakeGit {
         worktrees: Vec<Worktree>,
         merged: HashMap<String, bool>,
         facts_err: bool,
+        err_branches: HashSet<String>,
     }
     impl FakeGit {
         fn new() -> Self {
-            Self { worktrees: vec![], merged: HashMap::new(), facts_err: false }
+            Self {
+                worktrees: vec![],
+                merged: HashMap::new(),
+                facts_err: false,
+                err_branches: HashSet::new(),
+            }
         }
     }
     impl GitPort for FakeGit {
         type Error = FakeError;
         fn branch_facts(&self, branch: &str, _base: &str) -> Result<BranchFacts, Self::Error> {
             if self.facts_err {
+                return Err(FakeError);
+            }
+            if self.err_branches.contains(branch) {
                 return Err(FakeError);
             }
             Ok(BranchFacts {
@@ -229,5 +239,17 @@ mod tests {
         let git = FakeGit::new();
         let t = traceability(&git, &[], "main");
         assert_eq!(t, Traceability { merged: Some(0), total: 0 });
+    }
+
+    #[test]
+    fn traceability_discards_partial_count_when_a_later_node_errors() {
+        // First node would count as merged; the second node's facts error.
+        // The whole count must collapse to None — never a partial Some(1).
+        let mut git = FakeGit::new();
+        git.merged.insert("impl/a".to_string(), true);
+        git.err_branches.insert("impl/b".to_string());
+        let nodes = vec![dag("a", "impl/a"), dag("b", "impl/b")];
+        let t = traceability(&git, &nodes, "main");
+        assert_eq!(t, Traceability { merged: None, total: 2 });
     }
 }
