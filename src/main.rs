@@ -250,14 +250,9 @@ fn run_dag(command: DagCommand) -> Result<()> {
 /// point — `cockpit`/`render` are already generic over `GitPort`.
 struct UnknownGit;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("git adapter not yet available")]
 struct GitUnavailable;
-impl std::fmt::Display for GitUnavailable {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "git adapter not yet available")
-    }
-}
-impl std::error::Error for GitUnavailable {}
 
 impl GitPort for UnknownGit {
     type Error = GitUnavailable;
@@ -335,7 +330,7 @@ fn run_board(spec: &str, path: &Path) -> Result<()> {
 
     let spec_health = circuit::cockpit::health::rollup_children(&healths);
     let trace = circuit::cockpit::rollup::traceability(&git, &nodes, &base);
-    let m = trace.merged.map(|m| m.to_string()).unwrap_or_else(|| "?".to_string());
+    let m = trace.merged.map(|count| count.to_string()).unwrap_or_else(|| "?".to_string());
     println!("\nSpec health: {}", dag_board::glyph(spec_health));
     println!("Tasks: {}/{} done", m, trace.total);
     Ok(())
