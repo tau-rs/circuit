@@ -4,11 +4,16 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
 use circuit::dag::{validate, DagError};
+use circuit::flow::facts::{BranchFacts, DeliveryFacts};
+use circuit::flow::stage::derive_stage;
 use circuit::model::config::Config;
 use circuit::model::glossary::Glossary;
 use circuit::model::node::DagNode;
 use circuit::model::spec::SpecRecord;
 use circuit::model::store::Workspace;
+use circuit::ports::{GitPort, Worktree};
+use circuit::render::dag_board::{self, Board, BoardNode};
+use circuit::session::{SessionId, SessionRecord};
 
 #[derive(Parser)]
 #[command(name = "circuit", about = "Architecture derivation, sessions & flow")]
@@ -38,6 +43,13 @@ enum Command {
     Dag {
         #[command(subcommand)]
         command: DagCommand,
+    },
+    /// Spec-level DAG board (mermaid) with stage + health
+    Board {
+        /// Spec id whose DAG to render
+        spec: String,
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
     },
 }
 
@@ -102,6 +114,7 @@ fn main() -> Result<()> {
         Command::Init { path } => run_init(&path),
         Command::Spec { command } => run_spec(command),
         Command::Dag { command } => run_dag(command),
+        Command::Board { spec, path } => run_board(&spec, &path),
     }
 }
 
@@ -228,6 +241,104 @@ fn run_dag(command: DagCommand) -> Result<()> {
             std::process::exit(1);
         }
     }
+}
+
+/// No-op `GitPort` for the period before the git-adapter slice merges: it answers
+/// honestly that it knows nothing. `branch_facts` errors (=> `?` stage, `?/n`
+/// tasks); `list_worktrees` is empty (=> `Unknown` health). PR NOTE: when the git
+/// adapter lands, swap this for the real adapter at the one `run_board` wiring
+/// point — `cockpit`/`render` are already generic over `GitPort`.
+struct UnknownGit;
+
+#[derive(Debug)]
+struct GitUnavailable;
+impl std::fmt::Display for GitUnavailable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "git adapter not yet available")
+    }
+}
+impl std::error::Error for GitUnavailable {}
+
+impl GitPort for UnknownGit {
+    type Error = GitUnavailable;
+    fn branch_facts(&self, _branch: &str, _base: &str) -> Result<BranchFacts, Self::Error> {
+        Err(GitUnavailable)
+    }
+    fn create_branch(&self, _branch: &str, _base: &str) -> Result<(), Self::Error> {
+        Err(GitUnavailable)
+    }
+    fn add_worktree(&self, _branch: &str, _path: &Path) -> Result<(), Self::Error> {
+        Err(GitUnavailable)
+    }
+    fn list_worktrees(&self) -> Result<Vec<Worktree>, Self::Error> {
+        Ok(vec![])
+    }
+}
+
+fn run_board(spec: &str, path: &Path) -> Result<()> {
+    let ws = Workspace::new(path);
+    require_initialized(&ws)?;
+    let base = ws.load_config().context("reading config.toml")?.base_branch;
+    let nodes: Vec<DagNode> = ws
+        .list_dag_nodes()
+        .context("reading dag nodes")?
+        .into_iter()
+        .filter(|n| n.spec == spec)
+        .collect();
+    let sessions = ws.list_sessions().context("reading sessions")?;
+
+    let git = UnknownGit;
+
+    let mut board_nodes = Vec::new();
+    for n in &nodes {
+        let stage = match git.branch_facts(&n.branch, &base) {
+            Ok(branch) => {
+                let session = sessions
+                    .iter()
+                    .find(|s| s.dag_node.as_deref() == Some(n.id.as_str()))
+                    .cloned()
+                    // derive_stage ignores the session in M2, so a synthesized
+                    // record (with a throwaway id, never rendered) is sound here.
+                    .unwrap_or_else(|| {
+                        SessionRecord::impl_(SessionId::generate(), &n.spec, &n.id, &n.branch)
+                    });
+                let facts = DeliveryFacts { branch, review: None };
+                Some(derive_stage(&session, &facts))
+            }
+            Err(_) => None,
+        };
+        let health = circuit::cockpit::rollup::node_health(&git, &n.branch);
+        board_nodes.push(BoardNode {
+            id: n.id.clone(),
+            depends_on: n.depends_on.clone(),
+            stage,
+            health,
+        });
+    }
+
+    let board = Board { nodes: board_nodes };
+    print!("{}", dag_board::render(&board));
+
+    // Per-node readout, sorted by id (matches the board's node order).
+    println!("\n--- nodes ---");
+    let mut sorted: Vec<&BoardNode> = board.nodes.iter().collect();
+    sorted.sort_by(|a, b| a.id.cmp(&b.id));
+    let healths: Vec<_> = sorted.iter().map(|n| n.health).collect();
+    for n in &sorted {
+        println!(
+            "  {}  {}  {}",
+            n.id,
+            dag_board::stage_cell(&n.stage),
+            dag_board::glyph(n.health)
+        );
+    }
+
+    let spec_health = circuit::cockpit::health::rollup_children(&healths);
+    let trace = circuit::cockpit::rollup::traceability(&git, &nodes, &base);
+    let m = trace.merged.map(|m| m.to_string()).unwrap_or_else(|| "?".to_string());
+    println!("\nSpec health: {}", dag_board::glyph(spec_health));
+    println!("Tasks: {}/{} done", m, trace.total);
+    Ok(())
 }
 
 /// Append a line to `.gitignore` if not already present (idempotent).
