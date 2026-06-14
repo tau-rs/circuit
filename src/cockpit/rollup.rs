@@ -38,6 +38,32 @@ pub fn health_at_worktree(path: &Path) -> Health {
     }
 }
 
+/// Traceability `m / n` (design §8.3): how many DAG nodes are merged into base.
+/// `merged` is `None` when git cannot answer — we never report a partial count.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Traceability {
+    pub merged: Option<usize>,
+    pub total: usize,
+}
+
+/// Count DAG nodes whose branch is merged into `base`. Any `branch_facts` error
+/// collapses the whole count to `None` (undeterminable), keeping it honest.
+pub fn traceability<G: GitPort>(git: &G, nodes: &[DagNode], base: &str) -> Traceability {
+    let total = nodes.len();
+    let mut merged = 0usize;
+    for n in nodes {
+        match git.branch_facts(&n.branch, base) {
+            Ok(facts) => {
+                if facts.merged_into_base {
+                    merged += 1;
+                }
+            }
+            Err(_) => return Traceability { merged: None, total },
+        }
+    }
+    Traceability { merged: Some(merged), total }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,5 +199,35 @@ mod tests {
             health_at_worktree(Path::new("/no/such/worktree/xyz")),
             Health::Unknown
         );
+    }
+
+    fn dag(id: &str, branch: &str) -> DagNode {
+        DagNode::new(id, "checkout", id, branch)
+    }
+
+    #[test]
+    fn traceability_counts_merged_nodes() {
+        let mut git = FakeGit::new();
+        git.merged.insert("impl/a".to_string(), true);
+        git.merged.insert("impl/b".to_string(), false);
+        let nodes = vec![dag("a", "impl/a"), dag("b", "impl/b")];
+        let t = traceability(&git, &nodes, "main");
+        assert_eq!(t, Traceability { merged: Some(1), total: 2 });
+    }
+
+    #[test]
+    fn traceability_merged_is_none_when_facts_undeterminable() {
+        let mut git = FakeGit::new();
+        git.facts_err = true;
+        let nodes = vec![dag("a", "impl/a")];
+        let t = traceability(&git, &nodes, "main");
+        assert_eq!(t, Traceability { merged: None, total: 1 });
+    }
+
+    #[test]
+    fn traceability_of_empty_dag_is_zero_over_zero() {
+        let git = FakeGit::new();
+        let t = traceability(&git, &[], "main");
+        assert_eq!(t, Traceability { merged: Some(0), total: 0 });
     }
 }
