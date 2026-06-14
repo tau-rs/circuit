@@ -95,7 +95,9 @@ mod tests {
         DeliveryFacts {
             branch: BranchFacts {
                 exists,
-                commits_ahead_of_base: if substantive { 3 } else { 0 },
+                // Not a stage gate (rail decoration only); fixed so these tests
+                // never couple it to `has_substantive_changes`.
+                commits_ahead_of_base: 0,
                 has_substantive_changes: substantive,
                 merged_into_base: merged,
             },
