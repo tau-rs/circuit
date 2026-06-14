@@ -155,10 +155,23 @@ fn run_init(path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Fail fast if `.circuit/` was never initialized, so authoring commands never
+/// create a half-formed workspace with no config.toml.
+fn require_initialized(ws: &Workspace) -> Result<()> {
+    if !ws.is_initialized() {
+        anyhow::bail!(
+            "no .circuit/ workspace at {} — run `circuit init` first",
+            ws.root().display()
+        );
+    }
+    Ok(())
+}
+
 fn run_spec(command: SpecCommand) -> Result<()> {
     match command {
         SpecCommand::New { id, title, intent, contexts, path } => {
             let ws = Workspace::new(&path);
+            require_initialized(&ws)?;
             let mut spec = SpecRecord::new(&id, title, intent);
             spec.bounded_contexts = contexts;
             ws.save_spec(&spec).with_context(|| format!("writing spec {id}"))?;
@@ -172,6 +185,7 @@ fn run_dag(command: DagCommand) -> Result<()> {
     match command {
         DagCommand::AddNode { id, spec, title, branch, intent, depends_on, path } => {
             let ws = Workspace::new(&path);
+            require_initialized(&ws)?;
             let mut node = DagNode::new(&id, spec, title, branch);
             node.intent = intent;
             node.depends_on = depends_on;
@@ -181,6 +195,7 @@ fn run_dag(command: DagCommand) -> Result<()> {
         }
         DagCommand::Link { from, to, path } => {
             let ws = Workspace::new(&path);
+            require_initialized(&ws)?;
             let mut node = ws
                 .load_dag_node(&from)
                 .with_context(|| format!("loading dag node {from}"))?;

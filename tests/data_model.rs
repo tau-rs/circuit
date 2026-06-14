@@ -112,3 +112,15 @@ fn dag_check_reports_sound_and_cycles() {
         .failure()
         .stdout(predicate::str::contains("cycle"));
 }
+
+#[test]
+fn authoring_requires_init() {
+    let dir = tempfile::tempdir().unwrap();
+    // No `init` first: spec new must fail and not create a half-formed .circuit/.
+    circuit(dir.path())
+        .args(["spec", "new", "checkout", "--title", "C", "--intent", "pay"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("circuit init"));
+    assert!(!dir.path().join(".circuit/specs/checkout.toml").exists());
+}

@@ -18,6 +18,8 @@ pub enum DagError {
 /// Build an `ArchGraph` from DAG nodes (module = node id, edge = dependency),
 /// adding only edges whose target is a known node so dangling refs do not create
 /// phantom nodes. Reuses the M1 graph model so the M1 cycle detector applies.
+/// `find_cycles` reads only edges, so the architecture `Layer` that `ensure_module`
+/// assigns to each node id is irrelevant here and is never read.
 fn build_graph(nodes: &[DagNode], known: &HashSet<&str>) -> ArchGraph {
     let mut g = ArchGraph::new();
     for n in nodes {
