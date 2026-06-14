@@ -117,6 +117,14 @@ impl Workspace {
         self.sessions_dir().join(format!("{id}.toml"))
     }
 
+    pub fn checkpoints_dir(&self) -> PathBuf {
+        self.circuit_dir().join("checkpoints")
+    }
+
+    pub fn checkpoint_path(&self, session: &str) -> PathBuf {
+        self.checkpoints_dir().join(format!("{session}.toml"))
+    }
+
     pub fn load_session(&self, id: &str) -> Result<SessionRecord, ModelError> {
         load_toml(&self.session_path(id))
     }
@@ -185,9 +193,16 @@ mod tests {
         let ws = Workspace::new(dir.path());
         assert!(ws.list_dag_nodes().unwrap().is_empty());
 
-        ws.save_dag_node(&DagNode::new("b-slice", "s", "B", "impl/b")).unwrap();
-        ws.save_dag_node(&DagNode::new("a-slice", "s", "A", "impl/a")).unwrap();
-        let ids: Vec<String> = ws.list_dag_nodes().unwrap().into_iter().map(|n| n.id).collect();
+        ws.save_dag_node(&DagNode::new("b-slice", "s", "B", "impl/b"))
+            .unwrap();
+        ws.save_dag_node(&DagNode::new("a-slice", "s", "A", "impl/a"))
+            .unwrap();
+        let ids: Vec<String> = ws
+            .list_dag_nodes()
+            .unwrap()
+            .into_iter()
+            .map(|n| n.id)
+            .collect();
         assert_eq!(ids, vec!["a-slice".to_string(), "b-slice".to_string()]);
     }
 
