@@ -2,3 +2,4 @@
 //! its own `thiserror` error so the foundation never guesses failure modes.
 
 pub mod checkpoints;
+pub mod forge;
