@@ -52,7 +52,7 @@ Spec and implementation are different kinds of work, so they are different kinds
 
 This is fractal: spec, implementation, and fix sessions are the same object at different scopes. The **unit of an implementation session is a vertical slice / bounded context** (cohesive, ships an increment, one clean branch/PR); Circuit proposes a default DAG decomposition that the developer may edit before fan-out.
 
-> **Recommended (fan-out granularity):** vertical slice by default, editable DAG. Rationale: atomic-task sessions create coordination overhead and noisy PRs; pure auto-decomposition removes developer agency. *Pending explicit confirmation.*
+> **Decided (fan-out granularity):** vertical slice by default, editable DAG. Rationale: atomic-task sessions create coordination overhead and noisy PRs; pure auto-decomposition removes developer agency. Circuit proposes a slice-level decomposition that the developer can split/merge before spawning sessions.
 
 ### 4.3 Three separated concerns
 
@@ -112,7 +112,7 @@ No health colors. A pipeline + facts + actions.
 - **Per-session rail** — lifecycle spine: `Draft › Project › Implement › Review › Merge › Done`, carrying task progress, branch state, PR/checks.
 - **Spec-level DAG board** — every implementation session is a node showing its flow stage (where) + a small rolled-up health dot (the cockpit). This is also where the parallel/sequential fan-out lives.
 
-> **Recommended (flow rendering):** per-session rail + spec-level DAG board. A linear pipeline fits one session; the dependency graph fits the epic and already carries the fan-out structure. Kanban-by-stage is rejected — it discards the dependency structure. *Pending explicit confirmation.*
+> **Decided (flow rendering):** per-session rail + spec-level DAG board. A linear pipeline fits one session; the dependency graph fits the epic and already carries the fan-out structure. Kanban-by-stage is rejected — it discards the dependency structure.
 
 - **Automation action bar** (repetitive ceremony → one click): Update-from-base · Create PR · Merge · Re-run checks · Spawn next slice. *The cockpit/flow surface is a control surface, not just a readout.*
 - **Local strategy (no git remote):** identical six-stage spine; **local checkpoints act as synthetic PRs** (`Self-review` checkpoint snapshots, `Accepted` = developer marks done, `Archived` = snapshot frozen).
@@ -193,7 +193,7 @@ Circuit hosts existing ecosystems rather than reinventing them. Four swappable a
 2. Derivation performance on large repos (LSP batch-resolution is slow) — incremental recompute strategy and cache invalidation keyed on git state.
 3. Exact `.circuit/` file schema and its diff-friendliness in PR review.
 4. Conflict handling when reconciliation and an active session both propose model changes.
-5. Tau-rs repository: scope and name of the new repo (integration crate vs full Circuit home). **Deferred — not created until approved.**
+5. ~~Tau-rs repository: scope and name of the new repo.~~ **Resolved:** Circuit lives at `github.com/tau-rs/circuit` (public). Tau remains an M5 harness adapter — sharing the org is positioning, not coupling.
 
 ## 16. Roadmap (summary — detailed plan follows separately)
 
