@@ -127,6 +127,8 @@ impl<R: CommandRunner> ForgePort for GhForge<R> {
         ])?;
         let prs: Vec<GhPr> =
             serde_json::from_slice(&stdout).map_err(|source| ForgeError::Parse { source })?;
+        // `gh pr list` returns newest-first, so the first row is the most recent PR
+        // for this head (relevant when a closed PR precedes a reopened/new one).
         let Some(pr) = prs.into_iter().next() else {
             return Ok(ReviewState::None);
         };
