@@ -166,7 +166,7 @@ mod tests {
     }
 
     #[test]
-    fn fix_session_records_its_indicator() {
+    fn fix_session_records_all_fields_and_round_trips() {
         let s = SessionRecord::fix(
             SessionId::generate(),
             "checkout",
@@ -175,7 +175,14 @@ mod tests {
             "cycles",
         );
         assert_eq!(s.kind, SessionKind::Fix);
+        assert_eq!(s.parent.as_deref(), Some("checkout"));
+        assert_eq!(s.dag_node.as_deref(), Some("auth-slice"));
+        assert_eq!(s.branch.as_deref(), Some("fix/checkout-auth-cycles"));
         assert_eq!(s.fixes_indicator.as_deref(), Some("cycles"));
+
+        // Confirm fixes_indicator survives serialization (the fix-only field).
+        let parsed: SessionRecord = toml::from_str(&toml::to_string_pretty(&s).unwrap()).unwrap();
+        assert_eq!(parsed, s);
     }
 
     #[test]
