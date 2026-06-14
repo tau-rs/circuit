@@ -76,6 +76,27 @@ pub fn render(board: &Board) -> String {
             glyph(n.health),
         ));
     }
+
+    // Precedence edges: for `node.depends_on = [dep]`, emit `dep --> node`.
+    let mut edges: Vec<(String, String)> = Vec::new();
+    for n in &nodes {
+        for dep in &n.depends_on {
+            edges.push((dep.clone(), n.id.clone()));
+        }
+    }
+    edges.sort();
+    for (from, to) in &edges {
+        out.push_str(&format!("  {} --> {}\n", node_id(from), node_id(to)));
+    }
+
+    // Colorless styling: a single fixed class applied to every node regardless of
+    // health. Health lives only in the label glyph, never here.
+    if !nodes.is_empty() {
+        out.push_str("classDef flow fill:#fff,stroke:#999;\n");
+        let ids: Vec<String> = nodes.iter().map(|n| node_id(&n.id)).collect();
+        out.push_str(&format!("class {} flow;\n", ids.join(",")));
+    }
+
     out
 }
 
@@ -141,5 +162,69 @@ mod tests {
         let board = Board { nodes: vec![node("x", &[], None, Health::Unknown)] };
         let out = render(&board);
         assert!(out.contains(r#"x["x · ? · ?"]"#));
+    }
+
+    #[test]
+    fn renders_precedence_edges_sorted() {
+        // pay depends on auth -> precedence edge auth --> pay
+        let board = Board {
+            nodes: vec![
+                node("auth", &[], certain(Stage::Done), Health::Sound),
+                node("pay", &["auth"], certain(Stage::Implement), Health::Sound),
+            ],
+        };
+        let out = render(&board);
+        assert!(out.contains("auth --> pay"));
+        assert!(!out.contains("pay --> auth"));
+    }
+
+    #[test]
+    fn applies_one_colorless_class_to_all_nodes() {
+        let board = Board {
+            nodes: vec![
+                node("a", &[], certain(Stage::Implement), Health::Critical),
+                node("b", &["a"], certain(Stage::Review), Health::Sound),
+            ],
+        };
+        let out = render(&board);
+        let defs: Vec<&str> = out.lines().filter(|l| l.trim_start().starts_with("classDef")).collect();
+        assert_eq!(defs.len(), 1);
+        assert!(defs[0].contains("classDef flow"));
+        assert!(out.contains("class a,b flow;"));
+    }
+
+    /// The headline invariant: styling is a function of structure only, never of
+    /// health. Flipping every node's health leaves the classDef/class/style lines
+    /// byte-identical (design §8.2 / §5.3).
+    #[test]
+    fn styling_never_varies_with_health() {
+        let mk = |h: Health| Board {
+            nodes: vec![
+                node("a", &[], certain(Stage::Implement), h),
+                node("b", &["a"], None, h),
+            ],
+        };
+        let style_lines = |s: &str| {
+            s.lines()
+                .filter(|l| {
+                    let t = l.trim_start();
+                    t.starts_with("classDef") || t.starts_with("class ") || t.starts_with("style")
+                })
+                .map(|l| l.to_string())
+                .collect::<Vec<_>>()
+        };
+        let sound = render(&mk(Health::Sound));
+        let critical = render(&mk(Health::Critical));
+        let unknown = render(&mk(Health::Unknown));
+        assert_eq!(style_lines(&sound), style_lines(&critical));
+        assert_eq!(style_lines(&sound), style_lines(&unknown));
+        // Sanity: health DID change the output — just not the styling (it's in the label).
+        assert_ne!(sound, critical);
+    }
+
+    #[test]
+    fn empty_board_is_just_the_header() {
+        let board = Board { nodes: vec![] };
+        assert_eq!(render(&board), "graph TD\n");
     }
 }
