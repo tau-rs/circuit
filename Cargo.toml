@@ -10,6 +10,9 @@ tree-sitter-rust = "0.21"
 walkdir = "2"
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+thiserror = "1"
 
 [dev-dependencies]
 assert_cmd = "2"
