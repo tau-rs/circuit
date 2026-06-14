@@ -45,3 +45,36 @@ fn spec_new_writes_a_spec_record() {
     assert!(text.contains("billing"));
     assert!(text.contains("cart"));
 }
+
+#[test]
+fn dag_add_node_and_link_build_the_graph() {
+    let dir = tempfile::tempdir().unwrap();
+    circuit(dir.path()).arg("init").assert().success();
+
+    circuit(dir.path())
+        .args(["dag", "add-node", "cart-slice"])
+        .args(["--spec", "checkout"])
+        .args(["--title", "Cart slice"])
+        .args(["--branch", "impl/checkout-cart"])
+        .assert()
+        .success();
+
+    circuit(dir.path())
+        .args(["dag", "add-node", "auth-slice"])
+        .args(["--spec", "checkout"])
+        .args(["--title", "Auth slice"])
+        .args(["--branch", "impl/checkout-auth"])
+        .args(["--depends-on", "cart-slice"])
+        .assert()
+        .success();
+
+    // Link adds an extra dependency edge to an existing node.
+    circuit(dir.path())
+        .args(["dag", "link", "auth-slice", "cart-slice"])
+        .assert()
+        .success();
+
+    let auth = std::fs::read_to_string(dir.path().join(".circuit/dag/auth-slice.toml")).unwrap();
+    assert!(auth.contains("branch = \"impl/checkout-auth\""));
+    assert!(auth.contains("cart-slice"));
+}

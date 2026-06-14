@@ -5,6 +5,7 @@ use clap::{Parser, Subcommand};
 
 use circuit::model::config::Config;
 use circuit::model::glossary::Glossary;
+use circuit::model::node::DagNode;
 use circuit::model::spec::SpecRecord;
 use circuit::model::store::Workspace;
 
@@ -32,6 +33,11 @@ enum Command {
         #[command(subcommand)]
         command: SpecCommand,
     },
+    /// Task-DAG commands
+    Dag {
+        #[command(subcommand)]
+        command: DagCommand,
+    },
 }
 
 #[derive(Subcommand)]
@@ -52,12 +58,44 @@ enum SpecCommand {
     },
 }
 
+#[derive(Subcommand)]
+enum DagCommand {
+    /// Add a DAG node (one vertical slice)
+    AddNode {
+        /// Node id (used as the filename)
+        id: String,
+        #[arg(long)]
+        spec: String,
+        #[arg(long)]
+        title: String,
+        #[arg(long)]
+        branch: String,
+        #[arg(long, default_value = "")]
+        intent: String,
+        /// Dependency node id (repeatable)
+        #[arg(long = "depends-on")]
+        depends_on: Vec<String>,
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+    /// Add a dependency edge from one existing node to another
+    Link {
+        /// The dependent node
+        from: String,
+        /// The node it depends on
+        to: String,
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Analyze { path } => run_analyze(&path),
         Command::Init { path } => run_init(&path),
         Command::Spec { command } => run_spec(command),
+        Command::Dag { command } => run_dag(command),
     }
 }
 
@@ -119,6 +157,32 @@ fn run_spec(command: SpecCommand) -> Result<()> {
             spec.bounded_contexts = contexts;
             ws.save_spec(&spec).with_context(|| format!("writing spec {id}"))?;
             println!("Created spec session: {id}");
+            Ok(())
+        }
+    }
+}
+
+fn run_dag(command: DagCommand) -> Result<()> {
+    match command {
+        DagCommand::AddNode { id, spec, title, branch, intent, depends_on, path } => {
+            let ws = Workspace::new(&path);
+            let mut node = DagNode::new(&id, spec, title, branch);
+            node.intent = intent;
+            node.depends_on = depends_on;
+            ws.save_dag_node(&node).with_context(|| format!("writing dag node {id}"))?;
+            println!("Added DAG node: {id}");
+            Ok(())
+        }
+        DagCommand::Link { from, to, path } => {
+            let ws = Workspace::new(&path);
+            let mut node = ws
+                .load_dag_node(&from)
+                .with_context(|| format!("loading dag node {from}"))?;
+            if !node.depends_on.contains(&to) {
+                node.depends_on.push(to.clone());
+            }
+            ws.save_dag_node(&node).with_context(|| format!("writing dag node {from}"))?;
+            println!("Linked {from} → {to}");
             Ok(())
         }
     }
