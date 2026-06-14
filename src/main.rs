@@ -5,6 +5,7 @@ use clap::{Parser, Subcommand};
 
 use circuit::model::config::Config;
 use circuit::model::glossary::Glossary;
+use circuit::model::spec::SpecRecord;
 use circuit::model::store::Workspace;
 
 #[derive(Parser)]
@@ -26,6 +27,29 @@ enum Command {
         #[arg(default_value = ".")]
         path: PathBuf,
     },
+    /// Spec-session commands
+    Spec {
+        #[command(subcommand)]
+        command: SpecCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum SpecCommand {
+    /// Create a new spec session
+    New {
+        /// Spec id (used as the filename)
+        id: String,
+        #[arg(long)]
+        title: String,
+        #[arg(long)]
+        intent: String,
+        /// Bounded context (repeatable)
+        #[arg(long = "context")]
+        contexts: Vec<String>,
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
 }
 
 fn main() -> Result<()> {
@@ -33,6 +57,7 @@ fn main() -> Result<()> {
     match cli.command {
         Command::Analyze { path } => run_analyze(&path),
         Command::Init { path } => run_init(&path),
+        Command::Spec { command } => run_spec(command),
     }
 }
 
@@ -84,6 +109,19 @@ fn run_init(path: &Path) -> Result<()> {
     ensure_gitignored(path, ".circuit/local.toml").context("updating .gitignore")?;
     println!("Initialized .circuit/ at {}", ws.circuit_dir().display());
     Ok(())
+}
+
+fn run_spec(command: SpecCommand) -> Result<()> {
+    match command {
+        SpecCommand::New { id, title, intent, contexts, path } => {
+            let ws = Workspace::new(&path);
+            let mut spec = SpecRecord::new(&id, title, intent);
+            spec.bounded_contexts = contexts;
+            ws.save_spec(&spec).with_context(|| format!("writing spec {id}"))?;
+            println!("Created spec session: {id}");
+            Ok(())
+        }
+    }
 }
 
 /// Append a line to `.gitignore` if not already present (idempotent).
