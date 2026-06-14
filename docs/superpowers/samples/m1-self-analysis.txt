@@ -1,0 +1,20 @@
+Architecture — No-cycles (ADP): ● SOUND
+Architecture — Dependency rule: ● SOUND
+
+--- mermaid ---
+graph TD
+  builder["builder<br/>(Unknown)"]
+  graph["graph<br/>(Unknown)"]
+  indicators["indicators<br/>(Unknown)"]
+  lang["lang<br/>(Adapter)"]
+  layer["layer<br/>(Unknown)"]
+  render["render<br/>(Adapter)"]
+  root["root<br/>(Unknown)"]
+  builder --> graph
+  builder --> lang
+  graph --> layer
+  indicators --> graph
+  indicators --> layer
+  render --> graph
+  render --> indicators
+

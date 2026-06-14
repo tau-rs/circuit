@@ -1,0 +1,17 @@
+[package]
+name = "circuit"
+version = "0.1.0"
+edition = "2021"
+description = "Local-first, git-driven IDE core — architecture derivation & visualization"
+
+[dependencies]
+tree-sitter = "0.22"
+tree-sitter-rust = "0.21"
+walkdir = "2"
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+tempfile = "3"
