@@ -26,6 +26,9 @@ pub fn build_graph_from_sources(sources: &[(String, String)]) -> ArchGraph {
 
 /// IO adapter: walk `<root>/src` (or `<root>`), read `.rs` files, build the graph.
 pub fn build_graph(root: &Path) -> Result<ArchGraph> {
+    if !root.exists() {
+        anyhow::bail!("path not found: {}", root.display());
+    }
     let src_root = root.join("src");
     let base = if src_root.is_dir() { src_root } else { root.to_path_buf() };
 
@@ -74,5 +77,11 @@ mod tests {
         let a = g.module_id("adapters").unwrap();
         let d = g.module_id("domain").unwrap();
         assert_eq!(g.edges(), vec![(a, d)]);
+    }
+
+    #[test]
+    fn missing_path_is_an_error() {
+        let result = build_graph(std::path::Path::new("/no/such/circuit/path/xyz"));
+        assert!(result.is_err());
     }
 }
