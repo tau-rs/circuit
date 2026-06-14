@@ -1,8 +1,11 @@
+#![forbid(unsafe_code)]
+
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
+use circuit::adapters::forge::GhForge;
 use circuit::dag::{validate, DagError};
 use circuit::model::config::Config;
 use circuit::model::glossary::Glossary;
@@ -39,6 +42,26 @@ enum Command {
         #[command(subcommand)]
         command: DagCommand,
     },
+    /// Pull-request automation via the `gh` CLI
+    Pr {
+        #[command(subcommand)]
+        command: PrCommand,
+    },
+    /// Record a local review checkpoint (no-remote synthetic PR)
+    Checkpoint {
+        /// Session id
+        session: String,
+        #[arg(long, value_enum)]
+        state: CheckpointStateArg,
+        /// Commit sha this checkpoint snapshots
+        #[arg(long)]
+        commit: String,
+        /// Optional reviewer note
+        #[arg(long)]
+        note: Option<String>,
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -57,6 +80,54 @@ enum SpecCommand {
         #[arg(long, default_value = ".")]
         path: PathBuf,
     },
+}
+
+#[derive(Subcommand)]
+enum PrCommand {
+    /// Open a PR for a session's branch
+    Create {
+        /// Session id
+        session: String,
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long)]
+        body: Option<String>,
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+    /// Merge a session's PR
+    Merge {
+        /// Session id
+        session: String,
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+    /// Update a session's PR branch from base
+    UpdateFromBase {
+        /// Session id
+        session: String,
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+}
+
+/// CLI spelling of the checkpoint states (kebab-case: self-review|accepted|archived).
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum CheckpointStateArg {
+    SelfReview,
+    Accepted,
+    Archived,
+}
+
+impl From<CheckpointStateArg> for circuit::adapters::checkpoints::CheckpointState {
+    fn from(a: CheckpointStateArg) -> Self {
+        use circuit::adapters::checkpoints::CheckpointState as S;
+        match a {
+            CheckpointStateArg::SelfReview => S::SelfReview,
+            CheckpointStateArg::Accepted => S::Accepted,
+            CheckpointStateArg::Archived => S::Archived,
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -102,6 +173,14 @@ fn main() -> Result<()> {
         Command::Init { path } => run_init(&path),
         Command::Spec { command } => run_spec(command),
         Command::Dag { command } => run_dag(command),
+        Command::Pr { command } => run_pr(command),
+        Command::Checkpoint {
+            session,
+            state,
+            commit,
+            note,
+            path,
+        } => run_checkpoint(session, state, commit, note, path),
     }
 }
 
@@ -138,7 +217,10 @@ fn run_analyze(path: &Path) -> Result<()> {
     }
 
     println!("\n--- mermaid ---");
-    println!("{}", circuit::render::mermaid::render(&graph, &violations, &cycles));
+    println!(
+        "{}",
+        circuit::render::mermaid::render(&graph, &violations, &cycles)
+    );
     Ok(())
 }
 
@@ -148,8 +230,10 @@ fn run_init(path: &Path) -> Result<()> {
         println!("Already initialized at {}", ws.circuit_dir().display());
         return Ok(());
     }
-    ws.save_config(&Config::default()).context("writing config.toml")?;
-    ws.save_glossary(&Glossary::default()).context("writing glossary.toml")?;
+    ws.save_config(&Config::default())
+        .context("writing config.toml")?;
+    ws.save_glossary(&Glossary::default())
+        .context("writing glossary.toml")?;
     ensure_gitignored(path, ".circuit/local.toml").context("updating .gitignore")?;
     println!("Initialized .circuit/ at {}", ws.circuit_dir().display());
     Ok(())
@@ -169,12 +253,19 @@ fn require_initialized(ws: &Workspace) -> Result<()> {
 
 fn run_spec(command: SpecCommand) -> Result<()> {
     match command {
-        SpecCommand::New { id, title, intent, contexts, path } => {
+        SpecCommand::New {
+            id,
+            title,
+            intent,
+            contexts,
+            path,
+        } => {
             let ws = Workspace::new(&path);
             require_initialized(&ws)?;
             let mut spec = SpecRecord::new(&id, title, intent);
             spec.bounded_contexts = contexts;
-            ws.save_spec(&spec).with_context(|| format!("writing spec {id}"))?;
+            ws.save_spec(&spec)
+                .with_context(|| format!("writing spec {id}"))?;
             println!("Created spec session: {id}");
             Ok(())
         }
@@ -183,13 +274,22 @@ fn run_spec(command: SpecCommand) -> Result<()> {
 
 fn run_dag(command: DagCommand) -> Result<()> {
     match command {
-        DagCommand::AddNode { id, spec, title, branch, intent, depends_on, path } => {
+        DagCommand::AddNode {
+            id,
+            spec,
+            title,
+            branch,
+            intent,
+            depends_on,
+            path,
+        } => {
             let ws = Workspace::new(&path);
             require_initialized(&ws)?;
             let mut node = DagNode::new(&id, spec, title, branch);
             node.intent = intent;
             node.depends_on = depends_on;
-            ws.save_dag_node(&node).with_context(|| format!("writing dag node {id}"))?;
+            ws.save_dag_node(&node)
+                .with_context(|| format!("writing dag node {id}"))?;
             println!("Added DAG node: {id}");
             Ok(())
         }
@@ -202,7 +302,8 @@ fn run_dag(command: DagCommand) -> Result<()> {
             if !node.depends_on.contains(&to) {
                 node.depends_on.push(to.clone());
             }
-            ws.save_dag_node(&node).with_context(|| format!("writing dag node {from}"))?;
+            ws.save_dag_node(&node)
+                .with_context(|| format!("writing dag node {from}"))?;
             println!("Linked {from} → {to}");
             Ok(())
         }
@@ -228,6 +329,43 @@ fn run_dag(command: DagCommand) -> Result<()> {
             std::process::exit(1);
         }
     }
+}
+
+fn run_pr(command: PrCommand) -> Result<()> {
+    match command {
+        PrCommand::Create {
+            session,
+            title,
+            body,
+            path,
+        } => {
+            let ws = Workspace::new(&path);
+            require_initialized(&ws)?;
+            circuit::app::pr_create(&ws, &GhForge::new(), &session, title, body)
+        }
+        PrCommand::Merge { session, path } => {
+            let ws = Workspace::new(&path);
+            require_initialized(&ws)?;
+            circuit::app::pr_merge(&ws, &GhForge::new(), &session)
+        }
+        PrCommand::UpdateFromBase { session, path } => {
+            let ws = Workspace::new(&path);
+            require_initialized(&ws)?;
+            circuit::app::pr_update_from_base(&ws, &GhForge::new(), &session)
+        }
+    }
+}
+
+fn run_checkpoint(
+    session: String,
+    state: CheckpointStateArg,
+    commit: String,
+    note: Option<String>,
+    path: PathBuf,
+) -> Result<()> {
+    let ws = Workspace::new(&path);
+    require_initialized(&ws)?;
+    circuit::app::write_checkpoint(&ws, &session, state.into(), commit, note)
 }
 
 /// Append a line to `.gitignore` if not already present (idempotent).
