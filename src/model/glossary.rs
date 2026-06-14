@@ -38,6 +38,20 @@ mod tests {
     }
 
     #[test]
+    fn populated_round_trips_through_toml() {
+        let mut g = Glossary::default();
+        g.terms.push(Term {
+            name: "Order".into(),
+            definition: "A customer's confirmed basket.".into(),
+        });
+        let text = toml::to_string_pretty(&g).unwrap();
+        // The serde rename must be honoured on write: `[[term]]`, not `[[terms]]`.
+        assert!(text.contains("[[term]]"), "expected [[term]], got:\n{text}");
+        let parsed: Glossary = toml::from_str(&text).unwrap();
+        assert_eq!(parsed, g);
+    }
+
+    #[test]
     fn parses_terms_as_array_of_tables() {
         let text = r#"
             schema_version = 1

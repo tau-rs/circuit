@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 pub struct DagNode {
     pub schema_version: u32,
     pub id: String,
+    /// Spec session id this slice belongs to (foreign key to `SpecRecord.id`).
     pub spec: String,
     pub title: String,
     #[serde(default)]
@@ -60,6 +61,6 @@ mod tests {
         "#;
         let n: DagNode = toml::from_str(text).unwrap();
         assert!(n.depends_on.is_empty());
-        assert_eq!(n.intent, "");
+        assert!(n.intent.is_empty());
     }
 }
