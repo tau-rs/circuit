@@ -248,6 +248,11 @@ fn run_dag(command: DagCommand) -> Result<()> {
 /// tasks); `list_worktrees` is empty (=> `Unknown` health). PR NOTE: when the git
 /// adapter lands, swap this for the real adapter at the one `run_board` wiring
 /// point — `cockpit`/`render` are already generic over `GitPort`.
+///
+/// TODO(git-adapter): `run_board` calls `node_health` per node, so a real adapter
+/// would shell out to `git worktree list` once per node. When swapping in the real
+/// adapter, fetch the worktree list once and pass it down (or add a
+/// `node_health_in(&[Worktree], branch)` variant) to avoid N identical shell-outs.
 struct UnknownGit;
 
 #[derive(Debug, thiserror::Error)]
