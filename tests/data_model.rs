@@ -78,3 +78,37 @@ fn dag_add_node_and_link_build_the_graph() {
     assert!(auth.contains("branch = \"impl/checkout-auth\""));
     assert!(auth.contains("cart-slice"));
 }
+
+#[test]
+fn dag_check_reports_sound_and_cycles() {
+    let dir = tempfile::tempdir().unwrap();
+    circuit(dir.path()).arg("init").assert().success();
+
+    circuit(dir.path())
+        .args(["dag", "add-node", "cart-slice", "--spec", "checkout", "--title", "Cart", "--branch", "impl/cart"])
+        .assert()
+        .success();
+    circuit(dir.path())
+        .args(["dag", "add-node", "auth-slice", "--spec", "checkout", "--title", "Auth", "--branch", "impl/auth", "--depends-on", "cart-slice"])
+        .assert()
+        .success();
+
+    // Sound DAG.
+    circuit(dir.path())
+        .args(["dag", "check"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("DAG sound"));
+
+    // Introduce a cycle: cart-slice now depends on auth-slice.
+    circuit(dir.path())
+        .args(["dag", "link", "cart-slice", "auth-slice"])
+        .assert()
+        .success();
+
+    circuit(dir.path())
+        .args(["dag", "check"])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("cycle"));
+}

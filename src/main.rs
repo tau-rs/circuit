@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
+use circuit::dag::{validate, DagError};
 use circuit::model::config::Config;
 use circuit::model::glossary::Glossary;
 use circuit::model::node::DagNode;
@@ -84,6 +85,11 @@ enum DagCommand {
         from: String,
         /// The node it depends on
         to: String,
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+    /// Validate the DAG (acyclic, refs resolve, unique branches)
+    Check {
         #[arg(long, default_value = ".")]
         path: PathBuf,
     },
@@ -184,6 +190,27 @@ fn run_dag(command: DagCommand) -> Result<()> {
             ws.save_dag_node(&node).with_context(|| format!("writing dag node {from}"))?;
             println!("Linked {from} → {to}");
             Ok(())
+        }
+        DagCommand::Check { path } => {
+            let ws = Workspace::new(&path);
+            let nodes = ws.list_dag_nodes().context("reading dag nodes")?;
+            let errors = validate(&nodes);
+            if errors.is_empty() {
+                println!("DAG sound — {} node(s), no problems", nodes.len());
+                return Ok(());
+            }
+            for e in &errors {
+                match e {
+                    DagError::Cycle(c) => println!("  cycle: {}", c.join(" → ")),
+                    DagError::DanglingRef { node, missing } => {
+                        println!("  dangling ref: {node} → {missing} (no such node)")
+                    }
+                    DagError::DuplicateBranch { branch, nodes } => {
+                        println!("  duplicate branch {branch}: {}", nodes.join(", "))
+                    }
+                }
+            }
+            std::process::exit(1);
         }
     }
 }
