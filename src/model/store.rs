@@ -95,6 +95,7 @@ impl Workspace {
                     path: dir.display().to_string(),
                     source,
                 })?
+                // Best-effort: skip entries we can't stat (the open dir already succeeded).
                 .filter_map(|e| e.ok())
                 .map(|e| e.path())
                 .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("toml"))
