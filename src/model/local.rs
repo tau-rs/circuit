@@ -21,6 +21,9 @@ pub struct LocalConfig {
 ///
 /// In all cases the session id is appended as the final path component, so the
 /// returned path is `<base>/<session_id>`.
+///
+/// `repo_root` is expected to be an absolute path; the default-sibling branch
+/// derives `<repo_root_parent>/<repo_name>-worktrees`.
 pub fn resolve_worktree_dir(
     env: Option<&str>,
     local: &LocalConfig,
@@ -29,13 +32,15 @@ pub fn resolve_worktree_dir(
 ) -> PathBuf {
     let base: PathBuf = if let Some(e) = env.filter(|e| !e.is_empty()) {
         PathBuf::from(e)
-    } else if let Some(d) = &local.worktrees_dir {
-        d.clone()
+    } else if let Some(d) = local.worktrees_dir.as_deref() {
+        PathBuf::from(d)
     } else {
         let name = repo_root
             .file_name()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| "repo".to_string());
+        // A repo at the filesystem root has no parent; fall back to the repo
+        // root itself (a pathological case not expected in practice).
         let parent = repo_root
             .parent()
             .map(|p| p.to_path_buf())
@@ -54,7 +59,12 @@ mod tests {
         let local = LocalConfig {
             worktrees_dir: Some(PathBuf::from("/from/local")),
         };
-        let got = resolve_worktree_dir(Some("/from/env"), &local, Path::new("/repos/circuit"), "SID");
+        let got = resolve_worktree_dir(
+            Some("/from/env"),
+            &local,
+            Path::new("/repos/circuit"),
+            "SID",
+        );
         assert_eq!(got, PathBuf::from("/from/env/SID"));
     }
 
@@ -78,7 +88,12 @@ mod tests {
 
     #[test]
     fn default_is_sibling_worktrees_dir() {
-        let got = resolve_worktree_dir(None, &LocalConfig::default(), Path::new("/repos/circuit"), "SID");
+        let got = resolve_worktree_dir(
+            None,
+            &LocalConfig::default(),
+            Path::new("/repos/circuit"),
+            "SID",
+        );
         assert_eq!(got, PathBuf::from("/repos/circuit-worktrees/SID"));
     }
 

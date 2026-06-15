@@ -69,8 +69,9 @@ impl Workspace {
     /// Load `.circuit/local.toml`, or the all-`None` default when it is absent
     /// (the file is gitignored and may simply not exist on this machine).
     pub fn load_local(&self) -> Result<LocalConfig, ModelError> {
-        if self.local_path().exists() {
-            load_toml(&self.local_path())
+        let path = self.local_path();
+        if path.exists() {
+            load_toml(&path)
         } else {
             Ok(LocalConfig::default())
         }
@@ -199,9 +200,16 @@ mod tests {
         let ws = Workspace::new(dir.path());
         assert!(ws.list_dag_nodes().unwrap().is_empty());
 
-        ws.save_dag_node(&DagNode::new("b-slice", "s", "B", "impl/b")).unwrap();
-        ws.save_dag_node(&DagNode::new("a-slice", "s", "A", "impl/a")).unwrap();
-        let ids: Vec<String> = ws.list_dag_nodes().unwrap().into_iter().map(|n| n.id).collect();
+        ws.save_dag_node(&DagNode::new("b-slice", "s", "B", "impl/b"))
+            .unwrap();
+        ws.save_dag_node(&DagNode::new("a-slice", "s", "A", "impl/a"))
+            .unwrap();
+        let ids: Vec<String> = ws
+            .list_dag_nodes()
+            .unwrap()
+            .into_iter()
+            .map(|n| n.id)
+            .collect();
         assert_eq!(ids, vec!["a-slice".to_string(), "b-slice".to_string()]);
     }
 
@@ -223,7 +231,6 @@ mod tests {
 
     #[test]
     fn load_local_defaults_when_absent_and_round_trips_when_present() {
-        use crate::model::local::LocalConfig;
         let dir = tempfile::tempdir().unwrap();
         let ws = Workspace::new(dir.path());
         // Absent => default.
