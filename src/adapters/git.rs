@@ -126,17 +126,56 @@ impl GitPort for Git {
         })
     }
 
-    fn create_branch(&self, _branch: &str, _base: &str) -> Result<(), GitError> {
-        unimplemented!("Task 4")
+    fn create_branch(&self, branch: &str, base: &str) -> Result<(), GitError> {
+        // Create the ref without checking it out; add_worktree checks it out.
+        self.run(&["branch", branch, base]).map(|_| ())
     }
 
-    fn add_worktree(&self, _branch: &str, _path: &Path) -> Result<(), GitError> {
-        unimplemented!("Task 4")
+    fn add_worktree(&self, branch: &str, path: &Path) -> Result<(), GitError> {
+        let path_str = path.to_str().ok_or_else(|| GitError::Parse {
+            output: path.display().to_string(),
+            reason: "worktree path is not valid UTF-8".to_string(),
+        })?;
+        self.run(&["worktree", "add", path_str, branch]).map(|_| ())
     }
 
     fn list_worktrees(&self) -> Result<Vec<Worktree>, GitError> {
-        unimplemented!("Task 4")
+        let out = self.run(&["worktree", "list", "--porcelain"])?;
+        Ok(parse_worktree_porcelain(&out))
     }
+}
+
+/// Parse `git worktree list --porcelain` into `Worktree` entries. Blocks are
+/// separated by blank lines; each has a `worktree <path>` line and either a
+/// `branch refs/heads/<name>` line or a `detached` line.
+fn parse_worktree_porcelain(text: &str) -> Vec<Worktree> {
+    let mut out = Vec::new();
+    let mut path: Option<PathBuf> = None;
+    let mut branch: Option<String> = None;
+
+    let mut flush = |path: &mut Option<PathBuf>, branch: &mut Option<String>| {
+        if let Some(p) = path.take() {
+            out.push(Worktree {
+                path: p,
+                branch: branch.take(),
+            });
+        } else {
+            *branch = None;
+        }
+    };
+
+    for line in text.lines() {
+        if line.is_empty() {
+            flush(&mut path, &mut branch);
+        } else if let Some(p) = line.strip_prefix("worktree ") {
+            path = Some(PathBuf::from(p));
+        } else if let Some(b) = line.strip_prefix("branch ") {
+            branch = Some(b.strip_prefix("refs/heads/").unwrap_or(b).to_string());
+        }
+        // `HEAD <sha>` and `detached` lines need no handling (branch stays None).
+    }
+    flush(&mut path, &mut branch);
+    out
 }
 
 #[cfg(test)]
@@ -269,5 +308,65 @@ mod tests {
         let f = git.branch_facts("feat", "main").unwrap();
         assert!(f.exists);
         assert!(f.merged_into_base);
+    }
+
+    #[test]
+    fn create_branch_makes_a_new_ref() {
+        let (_d, git) = init_repo();
+        git.create_branch("impl/x", "main").unwrap();
+        // The ref now exists.
+        let f = git.branch_facts("impl/x", "main").unwrap();
+        assert!(f.exists);
+    }
+
+    #[test]
+    fn add_worktree_checks_out_the_branch_to_a_path() {
+        let (d, git) = init_repo();
+        git.create_branch("impl/x", "main").unwrap();
+        let wt = d.path().join("wt-x");
+        git.add_worktree("impl/x", &wt).unwrap();
+        assert!(wt.join("base.txt").exists(), "worktree should contain base commit");
+    }
+
+    #[test]
+    fn list_worktrees_includes_added_worktree_with_branch() {
+        let (d, git) = init_repo();
+        git.create_branch("impl/x", "main").unwrap();
+        let wt = d.path().join("wt-x");
+        git.add_worktree("impl/x", &wt).unwrap();
+
+        let list = git.list_worktrees().unwrap();
+        // The main worktree plus the one we added.
+        assert!(list.iter().any(|w| w.branch.as_deref() == Some("main")));
+        let added = list
+            .iter()
+            .find(|w| w.branch.as_deref() == Some("impl/x"))
+            .expect("added worktree should be listed");
+        // git may canonicalize the path (e.g. /var -> /private/var on macOS);
+        // compare on the final path component to stay portable.
+        assert_eq!(added.path.file_name().unwrap(), wt.file_name().unwrap());
+    }
+
+    #[test]
+    fn parse_worktree_porcelain_handles_branch_and_detached() {
+        let text = "\
+worktree /repo
+HEAD aaaa
+branch refs/heads/main
+
+worktree /repo/wt
+HEAD bbbb
+branch refs/heads/impl/x
+
+worktree /repo/detached
+HEAD cccc
+detached
+";
+        let ws = parse_worktree_porcelain(text);
+        assert_eq!(ws.len(), 3);
+        assert_eq!(ws[0].branch.as_deref(), Some("main"));
+        assert_eq!(ws[1].branch.as_deref(), Some("impl/x"));
+        assert_eq!(ws[1].path, PathBuf::from("/repo/wt"));
+        assert_eq!(ws[2].branch, None);
     }
 }
