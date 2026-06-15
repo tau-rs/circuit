@@ -86,6 +86,52 @@ impl Git {
     }
 }
 
+impl GitPort for Git {
+    type Error = GitError;
+
+    fn branch_facts(&self, branch: &str, base: &str) -> Result<BranchFacts, GitError> {
+        // A missing branch is Draft-shaped: report all-false defaults, not an error.
+        let exists = self.run_bool(&["rev-parse", "--verify", "--quiet", &format!("{branch}^{{commit}}")])?;
+        if !exists {
+            return Ok(BranchFacts::default());
+        }
+
+        let ahead_raw = self.run(&["rev-list", "--count", &format!("{base}..{branch}")])?;
+        let commits_ahead_of_base = ahead_raw.parse::<usize>().map_err(|e| GitError::Parse {
+            output: ahead_raw.clone(),
+            reason: e.to_string(),
+        })?;
+
+        // `diff --quiet base...branch` exits 1 when the merge-base..branch diff
+        // is non-empty. run_bool: true => no diff, so substantive = !no_diff.
+        let no_diff = self.run_bool(&["diff", "--quiet", &format!("{base}...{branch}")])?;
+        let has_substantive_changes = !no_diff;
+
+        // branch is an ancestor of base => already merged.
+        let merged_into_base =
+            self.run_bool(&["merge-base", "--is-ancestor", branch, base])?;
+
+        Ok(BranchFacts {
+            exists: true,
+            commits_ahead_of_base,
+            has_substantive_changes,
+            merged_into_base,
+        })
+    }
+
+    fn create_branch(&self, _branch: &str, _base: &str) -> Result<(), GitError> {
+        unimplemented!("Task 4")
+    }
+
+    fn add_worktree(&self, _branch: &str, _path: &Path) -> Result<(), GitError> {
+        unimplemented!("Task 4")
+    }
+
+    fn list_worktrees(&self) -> Result<Vec<Worktree>, GitError> {
+        unimplemented!("Task 4")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -137,5 +183,72 @@ mod tests {
         assert!(git
             .run_bool(&["merge-base", "--is-ancestor", "HEAD", "HEAD"])
             .unwrap());
+    }
+
+    /// Helper: run a raw git command in the repo (test setup only).
+    fn git_raw(p: &Path, args: &[&str]) {
+        let ok = Command::new("git")
+            .arg("-C")
+            .arg(p)
+            .args(args)
+            .output()
+            .unwrap()
+            .status
+            .success();
+        assert!(ok, "git {args:?} failed");
+    }
+
+    #[test]
+    fn branch_facts_for_missing_branch_is_default() {
+        let (_d, git) = init_repo();
+        let f = git.branch_facts("nope", "main").unwrap();
+        assert_eq!(f, BranchFacts::default());
+        assert!(!f.exists);
+    }
+
+    #[test]
+    fn branch_facts_for_branch_without_changes_is_project_shaped() {
+        let (d, git) = init_repo();
+        git_raw(d.path(), &["branch", "feat", "main"]);
+        let f = git.branch_facts("feat", "main").unwrap();
+        assert!(f.exists);
+        assert_eq!(f.commits_ahead_of_base, 0);
+        assert!(!f.has_substantive_changes);
+        // A branch at the same commit as base is technically an ancestor of base
+        // (--is-ancestor returns true), so merged_into_base reflects that.
+    }
+
+    #[test]
+    fn branch_facts_for_branch_with_commits_has_changes() {
+        let (d, git) = init_repo();
+        let p = d.path();
+        git_raw(p, &["branch", "feat", "main"]);
+        git_raw(p, &["worktree", "add", "-q", "wt", "feat"]);
+        std::fs::write(p.join("wt/new.txt"), "x\n").unwrap();
+        git_raw(&p.join("wt"), &["add", "new.txt"]);
+        git_raw(&p.join("wt"), &["commit", "-qm", "work"]);
+
+        let f = git.branch_facts("feat", "main").unwrap();
+        assert!(f.exists);
+        assert_eq!(f.commits_ahead_of_base, 1);
+        assert!(f.has_substantive_changes);
+        assert!(!f.merged_into_base);
+    }
+
+    #[test]
+    fn branch_facts_detects_merged_into_base() {
+        let (d, git) = init_repo();
+        let p = d.path();
+        git_raw(p, &["branch", "feat", "main"]);
+        git_raw(p, &["worktree", "add", "-q", "wt", "feat"]);
+        std::fs::write(p.join("wt/new.txt"), "x\n").unwrap();
+        git_raw(&p.join("wt"), &["add", "new.txt"]);
+        git_raw(&p.join("wt"), &["commit", "-qm", "work"]);
+        // Fast-forward main to feat so feat is an ancestor of main.
+        git_raw(p, &["merge", "-q", "feat"]);
+
+        let f = git.branch_facts("feat", "main").unwrap();
+        assert!(f.exists);
+        assert!(f.merged_into_base);
     }
 }
