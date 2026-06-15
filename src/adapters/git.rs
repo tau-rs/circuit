@@ -107,9 +107,16 @@ impl GitPort for Git {
         let no_diff = self.run_bool(&["diff", "--quiet", &format!("{base}...{branch}")])?;
         let has_substantive_changes = !no_diff;
 
-        // branch is an ancestor of base => already merged.
-        let merged_into_base =
-            self.run_bool(&["merge-base", "--is-ancestor", branch, base])?;
+        // "Merged" = branch is an ancestor of base AND base has strictly
+        // advanced beyond the branch tip (base is NOT also an ancestor of
+        // branch). A freshly-created branch sitting exactly at base satisfies
+        // is-ancestor in BOTH directions (equal tips), so it is NOT merged —
+        // it must derive to Project, not Done (§7.1). A fast-forward merge that
+        // leaves base == branch is indistinguishable from fresh via refs alone;
+        // Circuit merges via PR/merge-commits, so base advances in practice.
+        let branch_in_base = self.run_bool(&["merge-base", "--is-ancestor", branch, base])?;
+        let base_in_branch = self.run_bool(&["merge-base", "--is-ancestor", base, branch])?;
+        let merged_into_base = branch_in_base && !base_in_branch;
 
         Ok(BranchFacts {
             exists: true,
@@ -214,8 +221,7 @@ mod tests {
         assert!(f.exists);
         assert_eq!(f.commits_ahead_of_base, 0);
         assert!(!f.has_substantive_changes);
-        // A branch at the same commit as base is technically an ancestor of base
-        // (--is-ancestor returns true), so merged_into_base reflects that.
+        assert!(!f.merged_into_base);
     }
 
     #[test]
@@ -236,6 +242,17 @@ mod tests {
     }
 
     #[test]
+    fn fresh_branch_at_base_is_not_merged() {
+        // Regression: a branch created at base (no commits) is an ancestor of
+        // base, but must NOT be reported merged — it derives to Project (§7.1).
+        let (d, git) = init_repo();
+        git_raw(d.path(), &["branch", "feat", "main"]);
+        let f = git.branch_facts("feat", "main").unwrap();
+        assert!(f.exists);
+        assert!(!f.merged_into_base);
+    }
+
+    #[test]
     fn branch_facts_detects_merged_into_base() {
         let (d, git) = init_repo();
         let p = d.path();
@@ -244,8 +261,10 @@ mod tests {
         std::fs::write(p.join("wt/new.txt"), "x\n").unwrap();
         git_raw(&p.join("wt"), &["add", "new.txt"]);
         git_raw(&p.join("wt"), &["commit", "-qm", "work"]);
-        // Fast-forward main to feat so feat is an ancestor of main.
-        git_raw(p, &["merge", "-q", "feat"]);
+        // Merge feat into main with a merge commit so main advances beyond feat
+        // (the realistic PR-merge case; a fast-forward leaving equal tips is
+        // indistinguishable from a fresh branch and is intentionally not "Done").
+        git_raw(p, &["merge", "--no-ff", "-q", "-m", "merge feat", "feat"]);
 
         let f = git.branch_facts("feat", "main").unwrap();
         assert!(f.exists);
