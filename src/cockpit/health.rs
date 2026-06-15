@@ -61,11 +61,19 @@ mod tests {
     #[test]
     fn rollup_is_critical_on_any_violation() {
         assert_eq!(
-            SessionHealth { cycles: 1, dep_violations: 0 }.rollup(),
+            SessionHealth {
+                cycles: 1,
+                dep_violations: 0
+            }
+            .rollup(),
             Health::Critical
         );
         assert_eq!(
-            SessionHealth { cycles: 0, dep_violations: 3 }.rollup(),
+            SessionHealth {
+                cycles: 0,
+                dep_violations: 3
+            }
+            .rollup(),
             Health::Critical
         );
     }

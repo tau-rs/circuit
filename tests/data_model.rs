@@ -85,11 +85,33 @@ fn dag_check_reports_sound_and_cycles() {
     circuit(dir.path()).arg("init").assert().success();
 
     circuit(dir.path())
-        .args(["dag", "add-node", "cart-slice", "--spec", "checkout", "--title", "Cart", "--branch", "impl/cart"])
+        .args([
+            "dag",
+            "add-node",
+            "cart-slice",
+            "--spec",
+            "checkout",
+            "--title",
+            "Cart",
+            "--branch",
+            "impl/cart",
+        ])
         .assert()
         .success();
     circuit(dir.path())
-        .args(["dag", "add-node", "auth-slice", "--spec", "checkout", "--title", "Auth", "--branch", "impl/auth", "--depends-on", "cart-slice"])
+        .args([
+            "dag",
+            "add-node",
+            "auth-slice",
+            "--spec",
+            "checkout",
+            "--title",
+            "Auth",
+            "--branch",
+            "impl/auth",
+            "--depends-on",
+            "cart-slice",
+        ])
         .assert()
         .success();
 

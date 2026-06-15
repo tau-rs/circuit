@@ -13,15 +13,21 @@ fn node_id(name: &str) -> String {
 /// violating edges are labelled `|VIOLATION|`. Output is deterministic (sorted).
 pub fn render(graph: &ArchGraph, violations: &[Violation], cycles: &[Vec<String>]) -> String {
     let cyclic: HashSet<&str> = cycles.iter().flatten().map(|s| s.as_str()).collect();
-    let viol: HashSet<(&str, &str)> =
-        violations.iter().map(|v| (v.from.as_str(), v.to.as_str())).collect();
+    let viol: HashSet<(&str, &str)> = violations
+        .iter()
+        .map(|v| (v.from.as_str(), v.to.as_str()))
+        .collect();
 
     let mut out = String::from("graph TD\n");
 
     let mut mods: Vec<&crate::graph::Module> = graph.modules().iter().collect();
     mods.sort_by(|a, b| a.name.cmp(&b.name));
     for m in &mods {
-        let mark = if cyclic.contains(m.name.as_str()) { " ⟲" } else { "" };
+        let mark = if cyclic.contains(m.name.as_str()) {
+            " ⟲"
+        } else {
+            ""
+        };
         out.push_str(&format!(
             "  {}[\"{}<br/>({:?}){}\"]\n",
             node_id(&m.name),
@@ -39,7 +45,11 @@ pub fn render(graph: &ArchGraph, violations: &[Violation], cycles: &[Vec<String>
     edges.sort();
     for (f, t) in edges {
         if viol.contains(&(f.as_str(), t.as_str())) {
-            out.push_str(&format!("  {} -->|VIOLATION| {}\n", node_id(&f), node_id(&t)));
+            out.push_str(&format!(
+                "  {} -->|VIOLATION| {}\n",
+                node_id(&f),
+                node_id(&t)
+            ));
         } else {
             out.push_str(&format!("  {} --> {}\n", node_id(&f), node_id(&t)));
         }

@@ -28,7 +28,10 @@ impl ArchGraph {
             return id;
         }
         let id = self.modules.len();
-        self.modules.push(Module { name: name.to_string(), layer: layer_of(name) });
+        self.modules.push(Module {
+            name: name.to_string(),
+            layer: layer_of(name),
+        });
         self.index.insert(name.to_string(), id);
         id
     }

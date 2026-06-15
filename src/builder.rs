@@ -30,7 +30,11 @@ pub fn build_graph(root: &Path) -> Result<ArchGraph> {
         anyhow::bail!("path not found: {}", root.display());
     }
     let src_root = root.join("src");
-    let base = if src_root.is_dir() { src_root } else { root.to_path_buf() };
+    let base = if src_root.is_dir() {
+        src_root
+    } else {
+        root.to_path_buf()
+    };
 
     let mut sources = Vec::new();
     for entry in WalkDir::new(&base).into_iter().filter_map(|e| e.ok()) {
@@ -56,7 +60,10 @@ mod tests {
     #[test]
     fn builds_edges_between_modules() {
         let sources = vec![
-            ("adapters".to_string(), "use crate::domain::Order;".to_string()),
+            (
+                "adapters".to_string(),
+                "use crate::domain::Order;".to_string(),
+            ),
             ("domain".to_string(), "pub struct Order;".to_string()),
         ];
         let g = build_graph_from_sources(&sources);

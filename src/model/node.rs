@@ -42,7 +42,12 @@ mod tests {
 
     #[test]
     fn round_trips_through_toml() {
-        let mut n = DagNode::new("auth-slice", "checkout", "Authentication slice", "impl/checkout-auth");
+        let mut n = DagNode::new(
+            "auth-slice",
+            "checkout",
+            "Authentication slice",
+            "impl/checkout-auth",
+        );
         n.depends_on = vec!["cart-slice".to_string()];
         n.intent = "Log in and gate checkout.".to_string();
         let text = toml::to_string_pretty(&n).unwrap();

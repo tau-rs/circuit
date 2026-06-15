@@ -42,9 +42,15 @@ mod tests {
 
     #[test]
     fn extracts_simple_crate_dep() {
-        assert_eq!(extract_crate_dep("use crate::graph::ArchGraph;"), Some("graph".into()));
+        assert_eq!(
+            extract_crate_dep("use crate::graph::ArchGraph;"),
+            Some("graph".into())
+        );
         assert_eq!(extract_crate_dep("use crate::lang;"), Some("lang".into()));
-        assert_eq!(extract_crate_dep("pub use crate::render::mermaid;"), Some("render".into()));
+        assert_eq!(
+            extract_crate_dep("pub use crate::render::mermaid;"),
+            Some("render".into())
+        );
     }
 
     #[test]
