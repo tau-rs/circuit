@@ -317,6 +317,9 @@ fn run_session_spawn(dag_node: &str, path: &Path) -> Result<()> {
     }
 
     // 1. Allocate identity and write the authored record (parent = node.spec).
+    //    Record-first per §4/§7.1 (identity precedes the branch). If a later
+    //    git step fails, the branch-less record persists; delete the .toml (or
+    //    clean up the branch) and re-run — no automatic rollback in M2.
     let id = SessionId::generate();
     let record = SessionRecord::impl_(id, node.spec.clone(), node.id.clone(), node.branch.clone());
     ws.save_session(&record)
@@ -368,13 +371,12 @@ fn run_flow(selector: Option<&str>, path: &Path) -> Result<()> {
                 .with_context(|| format!("deriving facts for {b}"))?,
             None => Default::default(),
         };
-        let view = derive_stage(
-            s,
-            &DeliveryFacts {
-                branch: branch_facts.clone(),
-                review: None,
-            },
-        );
+        // Build the delivery facts once; borrow its `branch` for the renderer.
+        let facts = DeliveryFacts {
+            branch: branch_facts,
+            review: None,
+        };
+        let view = derive_stage(s, &facts);
         // Label by DAG node when present (impl/fix), else by session id (spec).
         let label = s.dag_node.clone().unwrap_or_else(|| s.id.to_string());
         blocks.push(render_rail(
@@ -382,7 +384,7 @@ fn run_flow(selector: Option<&str>, path: &Path) -> Result<()> {
             s.kind,
             view,
             s.branch.as_deref(),
-            &branch_facts,
+            &facts.branch,
             None,
             Health::Unknown,
         ));
