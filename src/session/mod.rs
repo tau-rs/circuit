@@ -206,9 +206,7 @@ mod tests {
 
     #[test]
     fn parses_a_spec_session_with_options_omitted() {
-        let text = format!(
-            "schema_version = 1\nid = \"{SAMPLE_ULID}\"\nkind = \"spec\"\n"
-        );
+        let text = format!("schema_version = 1\nid = \"{SAMPLE_ULID}\"\nkind = \"spec\"\n");
         let s: SessionRecord = toml::from_str(&text).unwrap();
         assert_eq!(s.kind, SessionKind::Spec);
         assert!(s.parent.is_none());

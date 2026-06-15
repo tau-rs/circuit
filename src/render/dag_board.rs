@@ -114,7 +114,10 @@ mod tests {
     }
 
     fn certain(s: Stage) -> Option<StageView> {
-        Some(StageView { stage: s, forge_certain: true })
+        Some(StageView {
+            stage: s,
+            forge_certain: true,
+        })
     }
 
     #[test]
@@ -122,7 +125,12 @@ mod tests {
         let board = Board {
             nodes: vec![
                 node("pay-slice", &[], certain(Stage::Review), Health::Sound),
-                node("auth-slice", &[], certain(Stage::Implement), Health::Critical),
+                node(
+                    "auth-slice",
+                    &[],
+                    certain(Stage::Implement),
+                    Health::Critical,
+                ),
             ],
         };
         let out = render(&board);
@@ -147,19 +155,27 @@ mod tests {
     fn stage_cell_renders_unknown_uncertain_and_certain() {
         assert_eq!(stage_cell(&None), "?");
         assert_eq!(
-            stage_cell(&Some(StageView { stage: Stage::Implement, forge_certain: true })),
+            stage_cell(&Some(StageView {
+                stage: Stage::Implement,
+                forge_certain: true
+            })),
             "Implement"
         );
         // forge-gated refinement unconfirmed -> trailing '?'
         assert_eq!(
-            stage_cell(&Some(StageView { stage: Stage::Review, forge_certain: false })),
+            stage_cell(&Some(StageView {
+                stage: Stage::Review,
+                forge_certain: false
+            })),
             "Review?"
         );
     }
 
     #[test]
     fn unknown_stage_and_health_render_as_question_marks() {
-        let board = Board { nodes: vec![node("x", &[], None, Health::Unknown)] };
+        let board = Board {
+            nodes: vec![node("x", &[], None, Health::Unknown)],
+        };
         let out = render(&board);
         assert!(out.contains(r#"x["x · ? · ?"]"#));
     }
@@ -187,7 +203,10 @@ mod tests {
             ],
         };
         let out = render(&board);
-        let defs: Vec<&str> = out.lines().filter(|l| l.trim_start().starts_with("classDef")).collect();
+        let defs: Vec<&str> = out
+            .lines()
+            .filter(|l| l.trim_start().starts_with("classDef"))
+            .collect();
         assert_eq!(defs.len(), 1);
         assert!(defs[0].contains("classDef flow"));
         assert!(out.contains("class a,b flow;"));

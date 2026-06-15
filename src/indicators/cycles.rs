@@ -102,6 +102,9 @@ mod tests {
         let b = g.ensure_module("b");
         g.add_edge(a, b);
         g.add_edge(b, a);
-        assert_eq!(find_cycles(&g), vec![vec!["a".to_string(), "b".to_string()]]);
+        assert_eq!(
+            find_cycles(&g),
+            vec![vec!["a".to_string(), "b".to_string()]]
+        );
     }
 }

@@ -58,7 +58,10 @@ pub fn validate(nodes: &[DagNode]) -> Vec<DagError> {
     // Duplicate branches.
     let mut by_branch: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
     for n in nodes {
-        by_branch.entry(n.branch.as_str()).or_default().push(n.id.as_str());
+        by_branch
+            .entry(n.branch.as_str())
+            .or_default()
+            .push(n.id.as_str());
     }
     for (branch, ns) in by_branch {
         if ns.len() > 1 {
@@ -101,10 +104,7 @@ mod tests {
 
     #[test]
     fn detects_a_dependency_cycle() {
-        let nodes = vec![
-            node("a", "impl/a", &["b"]),
-            node("b", "impl/b", &["a"]),
-        ];
+        let nodes = vec![node("a", "impl/a", &["b"]), node("b", "impl/b", &["a"])];
         let errors = validate(&nodes);
         assert!(errors.contains(&DagError::Cycle(vec!["a".to_string(), "b".to_string()])));
     }
@@ -123,10 +123,7 @@ mod tests {
 
     #[test]
     fn detects_duplicate_branches() {
-        let nodes = vec![
-            node("a", "impl/shared", &[]),
-            node("b", "impl/shared", &[]),
-        ];
+        let nodes = vec![node("a", "impl/shared", &[]), node("b", "impl/shared", &[])];
         assert_eq!(
             validate(&nodes),
             vec![DagError::DuplicateBranch {

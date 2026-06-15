@@ -151,7 +151,10 @@ fn run_analyze(path: &Path) -> Result<()> {
     }
 
     println!("\n--- mermaid ---");
-    println!("{}", circuit::render::mermaid::render(&graph, &violations, &cycles));
+    println!(
+        "{}",
+        circuit::render::mermaid::render(&graph, &violations, &cycles)
+    );
     Ok(())
 }
 
@@ -161,8 +164,10 @@ fn run_init(path: &Path) -> Result<()> {
         println!("Already initialized at {}", ws.circuit_dir().display());
         return Ok(());
     }
-    ws.save_config(&Config::default()).context("writing config.toml")?;
-    ws.save_glossary(&Glossary::default()).context("writing glossary.toml")?;
+    ws.save_config(&Config::default())
+        .context("writing config.toml")?;
+    ws.save_glossary(&Glossary::default())
+        .context("writing glossary.toml")?;
     ensure_gitignored(path, ".circuit/local.toml").context("updating .gitignore")?;
     println!("Initialized .circuit/ at {}", ws.circuit_dir().display());
     Ok(())
@@ -182,12 +187,19 @@ fn require_initialized(ws: &Workspace) -> Result<()> {
 
 fn run_spec(command: SpecCommand) -> Result<()> {
     match command {
-        SpecCommand::New { id, title, intent, contexts, path } => {
+        SpecCommand::New {
+            id,
+            title,
+            intent,
+            contexts,
+            path,
+        } => {
             let ws = Workspace::new(&path);
             require_initialized(&ws)?;
             let mut spec = SpecRecord::new(&id, title, intent);
             spec.bounded_contexts = contexts;
-            ws.save_spec(&spec).with_context(|| format!("writing spec {id}"))?;
+            ws.save_spec(&spec)
+                .with_context(|| format!("writing spec {id}"))?;
             println!("Created spec session: {id}");
             Ok(())
         }
@@ -196,13 +208,22 @@ fn run_spec(command: SpecCommand) -> Result<()> {
 
 fn run_dag(command: DagCommand) -> Result<()> {
     match command {
-        DagCommand::AddNode { id, spec, title, branch, intent, depends_on, path } => {
+        DagCommand::AddNode {
+            id,
+            spec,
+            title,
+            branch,
+            intent,
+            depends_on,
+            path,
+        } => {
             let ws = Workspace::new(&path);
             require_initialized(&ws)?;
             let mut node = DagNode::new(&id, spec, title, branch);
             node.intent = intent;
             node.depends_on = depends_on;
-            ws.save_dag_node(&node).with_context(|| format!("writing dag node {id}"))?;
+            ws.save_dag_node(&node)
+                .with_context(|| format!("writing dag node {id}"))?;
             println!("Added DAG node: {id}");
             Ok(())
         }
@@ -215,7 +236,8 @@ fn run_dag(command: DagCommand) -> Result<()> {
             if !node.depends_on.contains(&to) {
                 node.depends_on.push(to.clone());
             }
-            ws.save_dag_node(&node).with_context(|| format!("writing dag node {from}"))?;
+            ws.save_dag_node(&node)
+                .with_context(|| format!("writing dag node {from}"))?;
             println!("Linked {from} → {to}");
             Ok(())
         }
@@ -302,7 +324,10 @@ fn run_board(spec: &str, path: &Path) -> Result<()> {
                     .unwrap_or_else(|| {
                         SessionRecord::impl_(SessionId::generate(), &n.spec, &n.id, &n.branch)
                     });
-                let facts = DeliveryFacts { branch, review: None };
+                let facts = DeliveryFacts {
+                    branch,
+                    review: None,
+                };
                 Some(derive_stage(&session, &facts))
             }
             Err(_) => None,
@@ -335,7 +360,10 @@ fn run_board(spec: &str, path: &Path) -> Result<()> {
 
     let spec_health = circuit::cockpit::health::rollup_children(&healths);
     let trace = circuit::cockpit::rollup::traceability(&git, &nodes, &base);
-    let m = trace.merged.map(|count| count.to_string()).unwrap_or_else(|| "?".to_string());
+    let m = trace
+        .merged
+        .map(|count| count.to_string())
+        .unwrap_or_else(|| "?".to_string());
     println!("\nSpec health: {}", dag_board::glyph(spec_health));
     println!("Tasks: {}/{} done", m, trace.total);
     Ok(())
