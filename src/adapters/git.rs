@@ -91,7 +91,12 @@ impl GitPort for Git {
 
     fn branch_facts(&self, branch: &str, base: &str) -> Result<BranchFacts, GitError> {
         // A missing branch is Draft-shaped: report all-false defaults, not an error.
-        let exists = self.run_bool(&["rev-parse", "--verify", "--quiet", &format!("{branch}^{{commit}}")])?;
+        let exists = self.run_bool(&[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("{branch}^{{commit}}"),
+        ])?;
         if !exists {
             return Ok(BranchFacts::default());
         }
@@ -325,7 +330,10 @@ mod tests {
         git.create_branch("impl/x", "main").unwrap();
         let wt = d.path().join("wt-x");
         git.add_worktree("impl/x", &wt).unwrap();
-        assert!(wt.join("base.txt").exists(), "worktree should contain base commit");
+        assert!(
+            wt.join("base.txt").exists(),
+            "worktree should contain base commit"
+        );
     }
 
     #[test]
