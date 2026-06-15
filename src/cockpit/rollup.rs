@@ -19,7 +19,10 @@ pub fn node_health<G: GitPort>(git: &G, branch: &str) -> Health {
         Ok(w) => w,
         Err(_) => return Health::Unknown,
     };
-    match worktrees.into_iter().find(|w| w.branch.as_deref() == Some(branch)) {
+    match worktrees
+        .into_iter()
+        .find(|w| w.branch.as_deref() == Some(branch))
+    {
         Some(w) => health_at_worktree(&w.path),
         None => Health::Unknown,
     }
@@ -58,10 +61,18 @@ pub fn traceability<G: GitPort>(git: &G, nodes: &[DagNode], base: &str) -> Trace
                     merged += 1;
                 }
             }
-            Err(_) => return Traceability { merged: None, total },
+            Err(_) => {
+                return Traceability {
+                    merged: None,
+                    total,
+                }
+            }
         }
     }
-    Traceability { merged: Some(merged), total }
+    Traceability {
+        merged: Some(merged),
+        total,
+    }
 }
 
 #[cfg(test)]
@@ -222,7 +233,13 @@ mod tests {
         git.merged.insert("impl/b".to_string(), false);
         let nodes = vec![dag("a", "impl/a"), dag("b", "impl/b")];
         let t = traceability(&git, &nodes, "main");
-        assert_eq!(t, Traceability { merged: Some(1), total: 2 });
+        assert_eq!(
+            t,
+            Traceability {
+                merged: Some(1),
+                total: 2
+            }
+        );
     }
 
     #[test]
@@ -231,14 +248,26 @@ mod tests {
         git.facts_err = true;
         let nodes = vec![dag("a", "impl/a")];
         let t = traceability(&git, &nodes, "main");
-        assert_eq!(t, Traceability { merged: None, total: 1 });
+        assert_eq!(
+            t,
+            Traceability {
+                merged: None,
+                total: 1
+            }
+        );
     }
 
     #[test]
     fn traceability_of_empty_dag_is_zero_over_zero() {
         let git = FakeGit::new();
         let t = traceability(&git, &[], "main");
-        assert_eq!(t, Traceability { merged: Some(0), total: 0 });
+        assert_eq!(
+            t,
+            Traceability {
+                merged: Some(0),
+                total: 0
+            }
+        );
     }
 
     #[test]
@@ -250,6 +279,12 @@ mod tests {
         git.err_branches.insert("impl/b".to_string());
         let nodes = vec![dag("a", "impl/a"), dag("b", "impl/b")];
         let t = traceability(&git, &nodes, "main");
-        assert_eq!(t, Traceability { merged: None, total: 2 });
+        assert_eq!(
+            t,
+            Traceability {
+                merged: None,
+                total: 2
+            }
+        );
     }
 }

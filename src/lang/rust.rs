@@ -45,7 +45,10 @@ mod tests {
 
             pub fn f() {}
         "#;
-        assert_eq!(crate_deps_in_source(src), vec!["graph".to_string(), "layer".to_string()]);
+        assert_eq!(
+            crate_deps_in_source(src),
+            vec!["graph".to_string(), "layer".to_string()]
+        );
     }
 
     #[test]

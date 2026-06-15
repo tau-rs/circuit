@@ -109,62 +109,134 @@ mod tests {
     #[test]
     fn no_branch_is_draft() {
         let v = derive_stage(&session(), &facts(false, false, false, None));
-        assert_eq!(v, StageView { stage: Stage::Draft, forge_certain: true });
+        assert_eq!(
+            v,
+            StageView {
+                stage: Stage::Draft,
+                forge_certain: true
+            }
+        );
     }
 
     // Row 2 — git-only, even with undeterminable review.
     #[test]
     fn merged_is_done_even_offline() {
         let v = derive_stage(&session(), &facts(true, true, true, None));
-        assert_eq!(v, StageView { stage: Stage::Done, forge_certain: true });
+        assert_eq!(
+            v,
+            StageView {
+                stage: Stage::Done,
+                forge_certain: true
+            }
+        );
     }
 
     // Row 3
     #[test]
     fn branch_without_substantive_changes_is_project() {
-        let v = derive_stage(&session(), &facts(true, false, false, Some(ReviewState::None)));
-        assert_eq!(v, StageView { stage: Stage::Project, forge_certain: true });
+        let v = derive_stage(
+            &session(),
+            &facts(true, false, false, Some(ReviewState::None)),
+        );
+        assert_eq!(
+            v,
+            StageView {
+                stage: Stage::Project,
+                forge_certain: true
+            }
+        );
     }
 
     // Row 4 — the one honest-Unknown case.
     #[test]
     fn substantive_with_undeterminable_review_is_implement_uncertain() {
         let v = derive_stage(&session(), &facts(true, true, false, None));
-        assert_eq!(v, StageView { stage: Stage::Implement, forge_certain: false });
+        assert_eq!(
+            v,
+            StageView {
+                stage: Stage::Implement,
+                forge_certain: false
+            }
+        );
     }
 
     // Row 5
     #[test]
     fn substantive_no_pr_is_implement() {
-        let v = derive_stage(&session(), &facts(true, true, false, Some(ReviewState::None)));
-        assert_eq!(v, StageView { stage: Stage::Implement, forge_certain: true });
+        let v = derive_stage(
+            &session(),
+            &facts(true, true, false, Some(ReviewState::None)),
+        );
+        assert_eq!(
+            v,
+            StageView {
+                stage: Stage::Implement,
+                forge_certain: true
+            }
+        );
     }
 
     // Row 6
     #[test]
     fn open_pr_is_review() {
-        let v = derive_stage(&session(), &facts(true, true, false, Some(ReviewState::Open)));
-        assert_eq!(v, StageView { stage: Stage::Review, forge_certain: true });
+        let v = derive_stage(
+            &session(),
+            &facts(true, true, false, Some(ReviewState::Open)),
+        );
+        assert_eq!(
+            v,
+            StageView {
+                stage: Stage::Review,
+                forge_certain: true
+            }
+        );
     }
 
     // Row 7
     #[test]
     fn approved_pr_is_merge() {
-        let v = derive_stage(&session(), &facts(true, true, false, Some(ReviewState::Approved)));
-        assert_eq!(v, StageView { stage: Stage::Merge, forge_certain: true });
+        let v = derive_stage(
+            &session(),
+            &facts(true, true, false, Some(ReviewState::Approved)),
+        );
+        assert_eq!(
+            v,
+            StageView {
+                stage: Stage::Merge,
+                forge_certain: true
+            }
+        );
     }
 
     // Row 8
     #[test]
     fn forge_merged_is_done() {
-        let v = derive_stage(&session(), &facts(true, true, false, Some(ReviewState::Merged)));
-        assert_eq!(v, StageView { stage: Stage::Done, forge_certain: true });
+        let v = derive_stage(
+            &session(),
+            &facts(true, true, false, Some(ReviewState::Merged)),
+        );
+        assert_eq!(
+            v,
+            StageView {
+                stage: Stage::Done,
+                forge_certain: true
+            }
+        );
     }
 
     // Row 9
     #[test]
     fn closed_pr_is_implement() {
-        let v = derive_stage(&session(), &facts(true, true, false, Some(ReviewState::Closed)));
-        assert_eq!(v, StageView { stage: Stage::Implement, forge_certain: true });
+        let v = derive_stage(
+            &session(),
+            &facts(true, true, false, Some(ReviewState::Closed)),
+        );
+        assert_eq!(
+            v,
+            StageView {
+                stage: Stage::Implement,
+                forge_certain: true
+            }
+        );
     }
 }

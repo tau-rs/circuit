@@ -185,9 +185,16 @@ mod tests {
         let ws = Workspace::new(dir.path());
         assert!(ws.list_dag_nodes().unwrap().is_empty());
 
-        ws.save_dag_node(&DagNode::new("b-slice", "s", "B", "impl/b")).unwrap();
-        ws.save_dag_node(&DagNode::new("a-slice", "s", "A", "impl/a")).unwrap();
-        let ids: Vec<String> = ws.list_dag_nodes().unwrap().into_iter().map(|n| n.id).collect();
+        ws.save_dag_node(&DagNode::new("b-slice", "s", "B", "impl/b"))
+            .unwrap();
+        ws.save_dag_node(&DagNode::new("a-slice", "s", "A", "impl/a"))
+            .unwrap();
+        let ids: Vec<String> = ws
+            .list_dag_nodes()
+            .unwrap()
+            .into_iter()
+            .map(|n| n.id)
+            .collect();
         assert_eq!(ids, vec!["a-slice".to_string(), "b-slice".to_string()]);
     }
 

@@ -10,15 +10,41 @@ fn board_renders_colorless_mermaid_and_honest_unknowns() {
     let path = dir.path();
 
     let run = |args: &[&str]| {
-        Command::cargo_bin("circuit").unwrap().args(args).current_dir(path).assert().success();
+        Command::cargo_bin("circuit")
+            .unwrap()
+            .args(args)
+            .current_dir(path)
+            .assert()
+            .success();
     };
 
     run(&["init"]);
-    run(&["spec", "new", "checkout", "--title", "Checkout", "--intent", "Pay."]);
-    run(&["dag", "add-node", "auth", "--spec", "checkout", "--title", "Auth", "--branch", "impl/auth"]);
     run(&[
-        "dag", "add-node", "pay", "--spec", "checkout", "--title", "Pay",
-        "--branch", "impl/pay", "--depends-on", "auth",
+        "spec", "new", "checkout", "--title", "Checkout", "--intent", "Pay.",
+    ]);
+    run(&[
+        "dag",
+        "add-node",
+        "auth",
+        "--spec",
+        "checkout",
+        "--title",
+        "Auth",
+        "--branch",
+        "impl/auth",
+    ]);
+    run(&[
+        "dag",
+        "add-node",
+        "pay",
+        "--spec",
+        "checkout",
+        "--title",
+        "Pay",
+        "--branch",
+        "impl/pay",
+        "--depends-on",
+        "auth",
     ]);
 
     Command::cargo_bin("circuit")
