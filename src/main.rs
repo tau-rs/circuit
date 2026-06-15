@@ -3,12 +3,16 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
+use circuit::adapters::git::Git;
 use circuit::dag::{validate, DagError};
 use circuit::model::config::Config;
 use circuit::model::glossary::Glossary;
+use circuit::model::local::resolve_worktree_dir;
 use circuit::model::node::DagNode;
 use circuit::model::spec::SpecRecord;
 use circuit::model::store::Workspace;
+use circuit::ports::GitPort;
+use circuit::session::{SessionId, SessionRecord};
 
 #[derive(Parser)]
 #[command(name = "circuit", about = "Architecture derivation, sessions & flow")]
@@ -39,6 +43,18 @@ enum Command {
         #[command(subcommand)]
         command: DagCommand,
     },
+    /// Session lifecycle commands
+    Session {
+        #[command(subcommand)]
+        command: SessionCommand,
+    },
+    /// Render the per-session flow rail
+    Flow {
+        /// Session id (ULID) or unique DAG-node name; omit to show all sessions
+        session: Option<String>,
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -54,6 +70,18 @@ enum SpecCommand {
         /// Bounded context (repeatable)
         #[arg(long = "context")]
         contexts: Vec<String>,
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum SessionCommand {
+    /// Spawn an impl session for a DAG node: write the record, create the
+    /// branch, and add a worktree (the session derives to Project).
+    Spawn {
+        /// The DAG node id to execute
+        dag_node: String,
         #[arg(long, default_value = ".")]
         path: PathBuf,
     },
@@ -102,6 +130,8 @@ fn main() -> Result<()> {
         Command::Init { path } => run_init(&path),
         Command::Spec { command } => run_spec(command),
         Command::Dag { command } => run_dag(command),
+        Command::Session { command } => run_session(command),
+        Command::Flow { session, path } => run_flow(session.as_deref(), &path),
     }
 }
 
@@ -138,7 +168,10 @@ fn run_analyze(path: &Path) -> Result<()> {
     }
 
     println!("\n--- mermaid ---");
-    println!("{}", circuit::render::mermaid::render(&graph, &violations, &cycles));
+    println!(
+        "{}",
+        circuit::render::mermaid::render(&graph, &violations, &cycles)
+    );
     Ok(())
 }
 
@@ -148,8 +181,10 @@ fn run_init(path: &Path) -> Result<()> {
         println!("Already initialized at {}", ws.circuit_dir().display());
         return Ok(());
     }
-    ws.save_config(&Config::default()).context("writing config.toml")?;
-    ws.save_glossary(&Glossary::default()).context("writing glossary.toml")?;
+    ws.save_config(&Config::default())
+        .context("writing config.toml")?;
+    ws.save_glossary(&Glossary::default())
+        .context("writing glossary.toml")?;
     ensure_gitignored(path, ".circuit/local.toml").context("updating .gitignore")?;
     println!("Initialized .circuit/ at {}", ws.circuit_dir().display());
     Ok(())
@@ -169,12 +204,19 @@ fn require_initialized(ws: &Workspace) -> Result<()> {
 
 fn run_spec(command: SpecCommand) -> Result<()> {
     match command {
-        SpecCommand::New { id, title, intent, contexts, path } => {
+        SpecCommand::New {
+            id,
+            title,
+            intent,
+            contexts,
+            path,
+        } => {
             let ws = Workspace::new(&path);
             require_initialized(&ws)?;
             let mut spec = SpecRecord::new(&id, title, intent);
             spec.bounded_contexts = contexts;
-            ws.save_spec(&spec).with_context(|| format!("writing spec {id}"))?;
+            ws.save_spec(&spec)
+                .with_context(|| format!("writing spec {id}"))?;
             println!("Created spec session: {id}");
             Ok(())
         }
@@ -183,13 +225,22 @@ fn run_spec(command: SpecCommand) -> Result<()> {
 
 fn run_dag(command: DagCommand) -> Result<()> {
     match command {
-        DagCommand::AddNode { id, spec, title, branch, intent, depends_on, path } => {
+        DagCommand::AddNode {
+            id,
+            spec,
+            title,
+            branch,
+            intent,
+            depends_on,
+            path,
+        } => {
             let ws = Workspace::new(&path);
             require_initialized(&ws)?;
             let mut node = DagNode::new(&id, spec, title, branch);
             node.intent = intent;
             node.depends_on = depends_on;
-            ws.save_dag_node(&node).with_context(|| format!("writing dag node {id}"))?;
+            ws.save_dag_node(&node)
+                .with_context(|| format!("writing dag node {id}"))?;
             println!("Added DAG node: {id}");
             Ok(())
         }
@@ -202,7 +253,8 @@ fn run_dag(command: DagCommand) -> Result<()> {
             if !node.depends_on.contains(&to) {
                 node.depends_on.push(to.clone());
             }
-            ws.save_dag_node(&node).with_context(|| format!("writing dag node {from}"))?;
+            ws.save_dag_node(&node)
+                .with_context(|| format!("writing dag node {from}"))?;
             println!("Linked {from} → {to}");
             Ok(())
         }
@@ -228,6 +280,63 @@ fn run_dag(command: DagCommand) -> Result<()> {
             std::process::exit(1);
         }
     }
+}
+
+fn run_session(command: SessionCommand) -> Result<()> {
+    match command {
+        SessionCommand::Spawn { dag_node, path } => run_session_spawn(&dag_node, &path),
+    }
+}
+
+fn run_session_spawn(dag_node: &str, path: &Path) -> Result<()> {
+    let ws = Workspace::new(path);
+    require_initialized(&ws)?;
+
+    let node = ws
+        .load_dag_node(dag_node)
+        .with_context(|| format!("loading dag node {dag_node}"))?;
+    let config = ws.load_config().context("loading config.toml")?;
+    let base = &config.base_branch;
+
+    let git = Git::new(ws.root());
+
+    // Refuse to clobber an existing branch (a session may already own it).
+    if git
+        .branch_facts(&node.branch, base)
+        .with_context(|| format!("checking branch {}", node.branch))?
+        .exists
+    {
+        anyhow::bail!(
+            "branch {} already exists — refusing to spawn over it",
+            node.branch
+        );
+    }
+
+    // 1. Allocate identity and write the authored record (parent = node.spec).
+    let id = SessionId::generate();
+    let record = SessionRecord::impl_(id, node.spec.clone(), node.id.clone(), node.branch.clone());
+    ws.save_session(&record)
+        .with_context(|| format!("writing session {id}"))?;
+
+    // 2. Resolve the (machine-local, never-stored) worktree path.
+    let local = ws.load_local().context("loading local.toml")?;
+    let env = std::env::var("CIRCUIT_WORKTREES_DIR").ok();
+    let worktree = resolve_worktree_dir(env.as_deref(), &local, ws.root(), &id.to_string());
+
+    // 3. Create the branch + worktree.
+    git.create_branch(&node.branch, base)
+        .with_context(|| format!("creating branch {}", node.branch))?;
+    git.add_worktree(&node.branch, &worktree)
+        .with_context(|| format!("adding worktree at {}", worktree.display()))?;
+
+    println!("Spawned session {id} for node {} (stage: Project)", node.id);
+    println!("  branch:   {}", node.branch);
+    println!("  worktree: {}", worktree.display());
+    Ok(())
+}
+
+fn run_flow(_session: Option<&str>, _path: &Path) -> Result<()> {
+    unimplemented!("Task 8")
 }
 
 /// Append a line to `.gitignore` if not already present (idempotent).
