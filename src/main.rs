@@ -3,15 +3,19 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
+use circuit::adapters::git::Git;
+use circuit::cockpit::health::Health;
 use circuit::dag::{validate, DagError};
-use circuit::flow::facts::{BranchFacts, DeliveryFacts};
+use circuit::flow::facts::DeliveryFacts;
+use circuit::flow::rail::render_rail;
 use circuit::flow::stage::derive_stage;
 use circuit::model::config::Config;
 use circuit::model::glossary::Glossary;
+use circuit::model::local::resolve_worktree_dir;
 use circuit::model::node::DagNode;
 use circuit::model::spec::SpecRecord;
 use circuit::model::store::Workspace;
-use circuit::ports::{GitPort, Worktree};
+use circuit::ports::GitPort;
 use circuit::render::dag_board::{self, Board, BoardNode};
 use circuit::session::{SessionId, SessionRecord};
 
@@ -44,6 +48,18 @@ enum Command {
         #[command(subcommand)]
         command: DagCommand,
     },
+    /// Session lifecycle commands
+    Session {
+        #[command(subcommand)]
+        command: SessionCommand,
+    },
+    /// Render the per-session flow rail
+    Flow {
+        /// Session id (ULID) or unique DAG-node name; omit to show all sessions
+        session: Option<String>,
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
     /// Spec-level DAG board (mermaid) with stage + health
     Board {
         /// Spec id whose DAG to render
@@ -66,6 +82,18 @@ enum SpecCommand {
         /// Bounded context (repeatable)
         #[arg(long = "context")]
         contexts: Vec<String>,
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum SessionCommand {
+    /// Spawn an impl session for a DAG node: write the record, create the
+    /// branch, and add a worktree (the session derives to Project).
+    Spawn {
+        /// The DAG node id to execute
+        dag_node: String,
         #[arg(long, default_value = ".")]
         path: PathBuf,
     },
@@ -114,6 +142,8 @@ fn main() -> Result<()> {
         Command::Init { path } => run_init(&path),
         Command::Spec { command } => run_spec(command),
         Command::Dag { command } => run_dag(command),
+        Command::Session { command } => run_session(command),
+        Command::Flow { session, path } => run_flow(session.as_deref(), &path),
         Command::Board { spec, path } => run_board(&spec, &path),
     }
 }
@@ -265,35 +295,135 @@ fn run_dag(command: DagCommand) -> Result<()> {
     }
 }
 
-/// No-op `GitPort` for the period before the git-adapter slice merges: it answers
-/// honestly that it knows nothing. `branch_facts` errors (=> `?` stage, `?/n`
-/// tasks); `list_worktrees` is empty (=> `Unknown` health). PR NOTE: when the git
-/// adapter lands, swap this for the real adapter at the one `run_board` wiring
-/// point — `cockpit`/`render` are already generic over `GitPort`.
-///
-/// TODO(git-adapter): `run_board` calls `node_health` per node, so a real adapter
-/// would shell out to `git worktree list` once per node. When swapping in the real
-/// adapter, fetch the worktree list once and pass it down (or add a
-/// `node_health_in(&[Worktree], branch)` variant) to avoid N identical shell-outs.
-struct UnknownGit;
+fn run_session(command: SessionCommand) -> Result<()> {
+    match command {
+        SessionCommand::Spawn { dag_node, path } => run_session_spawn(&dag_node, &path),
+    }
+}
 
-#[derive(Debug, thiserror::Error)]
-#[error("git adapter not yet available")]
-struct GitUnavailable;
+fn run_session_spawn(dag_node: &str, path: &Path) -> Result<()> {
+    let ws = Workspace::new(path);
+    require_initialized(&ws)?;
 
-impl GitPort for UnknownGit {
-    type Error = GitUnavailable;
-    fn branch_facts(&self, _branch: &str, _base: &str) -> Result<BranchFacts, Self::Error> {
-        Err(GitUnavailable)
+    let node = ws
+        .load_dag_node(dag_node)
+        .with_context(|| format!("loading dag node {dag_node}"))?;
+    let config = ws.load_config().context("loading config.toml")?;
+    let base = &config.base_branch;
+
+    let git = Git::new(ws.root());
+
+    // Refuse to clobber an existing branch (a session may already own it).
+    if git
+        .branch_facts(&node.branch, base)
+        .with_context(|| format!("checking branch {}", node.branch))?
+        .exists
+    {
+        anyhow::bail!(
+            "branch {} already exists — refusing to spawn over it",
+            node.branch
+        );
     }
-    fn create_branch(&self, _branch: &str, _base: &str) -> Result<(), Self::Error> {
-        Err(GitUnavailable)
+
+    // 1. Allocate identity and write the authored record (parent = node.spec).
+    //    Record-first per §4/§7.1 (identity precedes the branch). If a later
+    //    git step fails, the branch-less record persists; delete the .toml (or
+    //    clean up the branch) and re-run — no automatic rollback in M2.
+    let id = SessionId::generate();
+    let record = SessionRecord::impl_(id, node.spec.clone(), node.id.clone(), node.branch.clone());
+    ws.save_session(&record)
+        .with_context(|| format!("writing session {id}"))?;
+
+    // 2. Resolve the (machine-local, never-stored) worktree path.
+    let local = ws.load_local().context("loading local.toml")?;
+    let env = std::env::var("CIRCUIT_WORKTREES_DIR").ok();
+    let worktree = resolve_worktree_dir(env.as_deref(), &local, ws.root(), &id.to_string());
+
+    // 3. Create the branch + worktree.
+    git.create_branch(&node.branch, base)
+        .with_context(|| format!("creating branch {}", node.branch))?;
+    git.add_worktree(&node.branch, &worktree)
+        .with_context(|| format!("adding worktree at {}", worktree.display()))?;
+
+    println!("Spawned session {id} for node {} (stage: Project)", node.id);
+    println!("  branch:   {}", node.branch);
+    println!("  worktree: {}", worktree.display());
+    Ok(())
+}
+
+/// Render the rail for one session (by ULID, else by unique DAG-node name) or,
+/// when `selector` is `None`, every session in the workspace.
+fn run_flow(selector: Option<&str>, path: &Path) -> Result<()> {
+    let ws = Workspace::new(path);
+    require_initialized(&ws)?;
+
+    let sessions = match selector {
+        Some(sel) => vec![resolve_session(&ws, sel)?],
+        None => ws.list_sessions().context("listing sessions")?,
+    };
+
+    if sessions.is_empty() {
+        println!("No sessions yet.");
+        return Ok(());
     }
-    fn add_worktree(&self, _branch: &str, _path: &Path) -> Result<(), Self::Error> {
-        Err(GitUnavailable)
+
+    let config = ws.load_config().context("loading config.toml")?;
+    let git = Git::new(ws.root());
+
+    let mut blocks = Vec::new();
+    for s in &sessions {
+        // git-only facts; forge/health are out of this slice (review = None,
+        // health = Unknown) and render honestly as `PR ?` / `health ?`.
+        let branch_facts = match &s.branch {
+            Some(b) => git
+                .branch_facts(b, &config.base_branch)
+                .with_context(|| format!("deriving facts for {b}"))?,
+            None => Default::default(),
+        };
+        // Build the delivery facts once; borrow its `branch` for the renderer.
+        let facts = DeliveryFacts {
+            branch: branch_facts,
+            review: None,
+        };
+        let view = derive_stage(s, &facts);
+        // Label by DAG node when present (impl/fix), else by session id (spec).
+        let label = s.dag_node.clone().unwrap_or_else(|| s.id.to_string());
+        blocks.push(render_rail(
+            &label,
+            s.kind,
+            view,
+            s.branch.as_deref(),
+            &facts.branch,
+            None,
+            Health::Unknown,
+        ));
     }
-    fn list_worktrees(&self) -> Result<Vec<Worktree>, Self::Error> {
-        Ok(vec![])
+    println!("{}", blocks.join("\n\n"));
+    Ok(())
+}
+
+/// Resolve a session selector: first as a ULID, then as a unique DAG-node name.
+fn resolve_session(ws: &Workspace, selector: &str) -> Result<SessionRecord> {
+    // Exact ULID match.
+    if selector.parse::<SessionId>().is_ok() {
+        if let Ok(s) = ws.load_session(selector) {
+            return Ok(s);
+        }
+    }
+    // Fall back to a unique DAG-node-name match.
+    let all = ws.list_sessions().context("listing sessions")?;
+    let mut matches: Vec<SessionRecord> = all
+        .into_iter()
+        .filter(|s| s.dag_node.as_deref() == Some(selector))
+        .collect();
+    match matches.len() {
+        1 => Ok(matches.pop().unwrap()),
+        0 => anyhow::bail!(
+            "no session matches `{selector}` (not a known session id or DAG-node name)"
+        ),
+        n => anyhow::bail!(
+            "`{selector}` matches {n} sessions — pass the session id (ULID) to disambiguate"
+        ),
     }
 }
 
@@ -309,7 +439,11 @@ fn run_board(spec: &str, path: &Path) -> Result<()> {
         .collect();
     let sessions = ws.list_sessions().context("reading sessions")?;
 
-    let git = UnknownGit;
+    // The real git adapter now backs the board, replacing the no-op stub the
+    // board slice shipped before this adapter landed. NOTE: node_health and
+    // traceability each query git per node, so this shells out per node — fine
+    // for M2 board sizes, batchable later if it becomes a cost.
+    let git = Git::new(ws.root());
 
     let mut board_nodes = Vec::new();
     for n in &nodes {

@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use super::{
-    config::Config, glossary::Glossary, load_toml, node::DagNode, save_toml, spec::SpecRecord,
-    ModelError,
+    config::Config, glossary::Glossary, load_toml, local::LocalConfig, node::DagNode, save_toml,
+    spec::SpecRecord, ModelError,
 };
 use crate::session::SessionRecord;
 
@@ -60,6 +60,21 @@ impl Workspace {
 
     pub fn save_config(&self, c: &Config) -> Result<(), ModelError> {
         save_toml(&self.config_path(), c)
+    }
+
+    pub fn local_path(&self) -> PathBuf {
+        self.circuit_dir().join("local.toml")
+    }
+
+    /// Load `.circuit/local.toml`, or the all-`None` default when it is absent
+    /// (the file is gitignored and may simply not exist on this machine).
+    pub fn load_local(&self) -> Result<LocalConfig, ModelError> {
+        let path = self.local_path();
+        if path.exists() {
+            load_toml(&path)
+        } else {
+            Ok(LocalConfig::default())
+        }
     }
 
     pub fn load_glossary(&self) -> Result<Glossary, ModelError> {
@@ -212,6 +227,20 @@ mod tests {
         );
         ws.save_session(&s).unwrap();
         assert_eq!(ws.load_session(&s.id.to_string()).unwrap(), s);
+    }
+
+    #[test]
+    fn load_local_defaults_when_absent_and_round_trips_when_present() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = Workspace::new(dir.path());
+        // Absent => default.
+        assert_eq!(ws.load_local().unwrap(), LocalConfig::default());
+        // Present => round-trips.
+        let c = LocalConfig {
+            worktrees_dir: Some(std::path::PathBuf::from("/tmp/wt")),
+        };
+        save_toml(&ws.local_path(), &c).unwrap();
+        assert_eq!(ws.load_local().unwrap(), c);
     }
 
     #[test]
