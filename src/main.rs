@@ -4,7 +4,11 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
 use circuit::adapters::git::Git;
+use circuit::cockpit::health::Health;
 use circuit::dag::{validate, DagError};
+use circuit::flow::facts::DeliveryFacts;
+use circuit::flow::rail::render_rail;
+use circuit::flow::stage::derive_stage;
 use circuit::model::config::Config;
 use circuit::model::glossary::Glossary;
 use circuit::model::local::resolve_worktree_dir;
@@ -335,8 +339,81 @@ fn run_session_spawn(dag_node: &str, path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn run_flow(_session: Option<&str>, _path: &Path) -> Result<()> {
-    unimplemented!("Task 8")
+/// Render the rail for one session (by ULID, else by unique DAG-node name) or,
+/// when `selector` is `None`, every session in the workspace.
+fn run_flow(selector: Option<&str>, path: &Path) -> Result<()> {
+    let ws = Workspace::new(path);
+    require_initialized(&ws)?;
+
+    let sessions = match selector {
+        Some(sel) => vec![resolve_session(&ws, sel)?],
+        None => ws.list_sessions().context("listing sessions")?,
+    };
+
+    if sessions.is_empty() {
+        println!("No sessions yet.");
+        return Ok(());
+    }
+
+    let config = ws.load_config().context("loading config.toml")?;
+    let git = Git::new(ws.root());
+
+    let mut blocks = Vec::new();
+    for s in &sessions {
+        // git-only facts; forge/health are out of this slice (review = None,
+        // health = Unknown) and render honestly as `PR ?` / `health ?`.
+        let branch_facts = match &s.branch {
+            Some(b) => git
+                .branch_facts(b, &config.base_branch)
+                .with_context(|| format!("deriving facts for {b}"))?,
+            None => Default::default(),
+        };
+        let view = derive_stage(
+            s,
+            &DeliveryFacts {
+                branch: branch_facts.clone(),
+                review: None,
+            },
+        );
+        // Label by DAG node when present (impl/fix), else by session id (spec).
+        let label = s.dag_node.clone().unwrap_or_else(|| s.id.to_string());
+        blocks.push(render_rail(
+            &label,
+            s.kind,
+            view,
+            s.branch.as_deref(),
+            &branch_facts,
+            None,
+            Health::Unknown,
+        ));
+    }
+    println!("{}", blocks.join("\n\n"));
+    Ok(())
+}
+
+/// Resolve a session selector: first as a ULID, then as a unique DAG-node name.
+fn resolve_session(ws: &Workspace, selector: &str) -> Result<SessionRecord> {
+    // Exact ULID match.
+    if selector.parse::<SessionId>().is_ok() {
+        if let Ok(s) = ws.load_session(selector) {
+            return Ok(s);
+        }
+    }
+    // Fall back to a unique DAG-node-name match.
+    let all = ws.list_sessions().context("listing sessions")?;
+    let mut matches: Vec<SessionRecord> = all
+        .into_iter()
+        .filter(|s| s.dag_node.as_deref() == Some(selector))
+        .collect();
+    match matches.len() {
+        1 => Ok(matches.pop().unwrap()),
+        0 => anyhow::bail!(
+            "no session matches `{selector}` (not a known session id or DAG-node name)"
+        ),
+        n => anyhow::bail!(
+            "`{selector}` matches {n} sessions — pass the session id (ULID) to disambiguate"
+        ),
+    }
 }
 
 /// Append a line to `.gitignore` if not already present (idempotent).
