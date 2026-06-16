@@ -3,6 +3,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
+use circuit::adapters::checkpoints::Checkpoints;
+use circuit::adapters::delivery::{self, DeliveryMode};
+use circuit::adapters::forge::Forge;
 use circuit::adapters::git::Git;
 use circuit::cockpit::health::Health;
 use circuit::dag::{validate, DagError};
@@ -15,7 +18,7 @@ use circuit::model::local::resolve_worktree_dir;
 use circuit::model::node::DagNode;
 use circuit::model::spec::SpecRecord;
 use circuit::model::store::Workspace;
-use circuit::ports::GitPort;
+use circuit::ports::{CheckpointStore, ForgePort, GitPort};
 use circuit::render::dag_board::{self, Board, BoardNode};
 use circuit::session::{SessionId, SessionRecord};
 
@@ -351,6 +354,27 @@ fn run_session_spawn(dag_node: &str, path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Is the `gh` CLI installed and runnable? (Auth is checked per-call via the
+/// review_state error path; this only gates which source we consult.)
+fn gh_available() -> bool {
+    std::process::Command::new("gh")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// Does the repo at `root` have a remote pointing at github.com?
+fn has_github_remote(root: &Path) -> bool {
+    std::process::Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["remote", "-v"])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).contains("github.com"))
+        .unwrap_or(false)
+}
+
 /// Render the rail for one session (by ULID, else by unique DAG-node name) or,
 /// when `selector` is `None`, every session in the workspace.
 fn run_flow(selector: Option<&str>, path: &Path) -> Result<()> {
@@ -369,21 +393,31 @@ fn run_flow(selector: Option<&str>, path: &Path) -> Result<()> {
 
     let config = ws.load_config().context("loading config.toml")?;
     let git = Git::new(ws.root());
+    let mode = delivery::resolve(gh_available(), has_github_remote(ws.root()));
+    let forge = Forge::new(ws.root());
+    let checkpoints = Checkpoints::new(ws.root());
 
     let mut blocks = Vec::new();
     for s in &sessions {
-        // git-only facts; forge/health are out of this slice (review = None,
-        // health = Unknown) and render honestly as `PR ?` / `health ?`.
         let branch_facts = match &s.branch {
             Some(b) => git
                 .branch_facts(b, &config.base_branch)
                 .with_context(|| format!("deriving facts for {b}"))?,
             None => Default::default(),
         };
-        // Build the delivery facts once; borrow its `branch` for the renderer.
+        // Resolve real review state from the selected source. Any adapter Err
+        // (forge unreachable, unreadable checkpoint) degrades to `None` —
+        // the honest "undeterminable" path that renders `PR ?` (§7.2).
+        let review = match (&s.branch, mode) {
+            (Some(b), DeliveryMode::Forge) => forge.review_state(b).ok(),
+            (Some(_), DeliveryMode::Local) => {
+                checkpoints.review_state(&s.id.to_string()).ok()
+            }
+            (None, _) => None,
+        };
         let facts = DeliveryFacts {
             branch: branch_facts,
-            review: None,
+            review,
         };
         let view = derive_stage(s, &facts);
         // Label by DAG node when present (impl/fix), else by session id (spec).
