@@ -131,21 +131,38 @@ impl ForgePort for Forge {
 
     fn create_pr(
         &self,
-        _branch: &str,
-        _base: &str,
-        _title: &str,
-        _body: &str,
+        branch: &str,
+        base: &str,
+        title: &str,
+        body: &str,
     ) -> Result<(), ForgeError> {
-        unimplemented!("Task 4")
+        self.run_checked(&create_pr_args(branch, base, title, body))
     }
 
-    fn merge(&self, _branch: &str) -> Result<(), ForgeError> {
-        unimplemented!("Task 4")
+    fn merge(&self, branch: &str) -> Result<(), ForgeError> {
+        self.run_checked(&merge_args(branch))
     }
 
-    fn update_from_base(&self, _branch: &str, _base: &str) -> Result<(), ForgeError> {
-        unimplemented!("Task 4")
+    fn update_from_base(&self, branch: &str, base: &str) -> Result<(), ForgeError> {
+        self.run_checked(&update_from_base_args(branch, base))
     }
+}
+
+/// Build the `gh` argv for opening a PR. Pure — asserted in tests.
+fn create_pr_args<'a>(branch: &'a str, base: &'a str, title: &'a str, body: &'a str) -> Vec<&'a str> {
+    vec![
+        "pr", "create", "--head", branch, "--base", base, "--title", title, "--body", body,
+    ]
+}
+
+/// Build the `gh` argv for merging a PR (merge-commit strategy).
+fn merge_args(branch: &str) -> Vec<&str> {
+    vec!["pr", "merge", branch, "--merge"]
+}
+
+/// Build the `gh` argv for updating a PR branch from its base.
+fn update_from_base_args<'a>(branch: &'a str, _base: &'a str) -> Vec<&'a str> {
+    vec!["pr", "update-branch", branch]
 }
 
 #[cfg(test)]
@@ -223,5 +240,43 @@ mod tests {
     fn missing_delimiter_is_parse_error() {
         let r = parse_review_state(Some(0),"OPEN", "");
         assert!(matches!(r, Err(ForgeError::Parse { .. })));
+    }
+
+    #[test]
+    fn create_pr_args_are_well_formed() {
+        let a = create_pr_args("impl/x", "main", "Add x", "body text");
+        assert_eq!(
+            a,
+            vec![
+                "pr", "create",
+                "--head", "impl/x",
+                "--base", "main",
+                "--title", "Add x",
+                "--body", "body text",
+            ]
+        );
+    }
+
+    #[test]
+    fn merge_args_use_merge_strategy() {
+        assert_eq!(merge_args("impl/x"), vec!["pr", "merge", "impl/x", "--merge"]);
+    }
+
+    #[test]
+    fn update_from_base_args_target_the_branch() {
+        assert_eq!(
+            update_from_base_args("impl/x", "main"),
+            vec!["pr", "update-branch", "impl/x"]
+        );
+    }
+
+    // Live test against real `gh` + a real repo/PR. Never runs in CI; run
+    // manually with `cargo test -- --ignored forge_live_review_state`.
+    #[test]
+    #[ignore]
+    fn forge_live_review_state() {
+        let forge = Forge::new(".");
+        // Adjust the branch to one with a known PR before running manually.
+        let _ = forge.review_state("main");
     }
 }
