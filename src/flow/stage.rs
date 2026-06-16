@@ -64,6 +64,7 @@ pub fn derive_stage(_session: &SessionRecord, facts: &DeliveryFacts) -> StageVie
         },
         Some(ReviewState::None) => StageView::certain(Stage::Implement),
         Some(ReviewState::Open) => StageView::certain(Stage::Review),
+        Some(ReviewState::ChangesRequested) => StageView::certain(Stage::Review),
         Some(ReviewState::Approved) => StageView::certain(Stage::Merge),
         Some(ReviewState::Merged) => StageView::certain(Stage::Done),
         Some(ReviewState::Closed) => StageView::certain(Stage::Implement),
@@ -182,6 +183,22 @@ mod tests {
         let v = derive_stage(
             &session(),
             &facts(true, true, false, Some(ReviewState::Open)),
+        );
+        assert_eq!(
+            v,
+            StageView {
+                stage: Stage::Review,
+                forge_certain: true
+            }
+        );
+    }
+
+    // ChangesRequested stays at Review — the stage marker does not jump back.
+    #[test]
+    fn changes_requested_is_review() {
+        let v = derive_stage(
+            &session(),
+            &facts(true, true, false, Some(ReviewState::ChangesRequested)),
         );
         assert_eq!(
             v,

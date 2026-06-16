@@ -52,6 +52,7 @@ fn review_label(r: Option<ReviewState>) -> &'static str {
         None => "PR ?",
         Some(ReviewState::None) => "no PR",
         Some(ReviewState::Open) => "PR open",
+        Some(ReviewState::ChangesRequested) => "PR changes requested",
         Some(ReviewState::Approved) => "PR approved",
         Some(ReviewState::Merged) => "PR merged",
         Some(ReviewState::Closed) => "PR closed",
@@ -270,6 +271,24 @@ mod tests {
             }
         }
         assert_eq!(SPINE.len(), 6, "SPINE must list all six stages");
+    }
+
+    #[test]
+    fn changes_requested_renders_its_own_label() {
+        let view = StageView {
+            stage: Stage::Review,
+            forge_certain: true,
+        };
+        let out = render_rail(
+            "a",
+            SessionKind::Impl,
+            view,
+            Some("impl/x"),
+            &facts(2),
+            Some(ReviewState::ChangesRequested),
+            Health::Sound,
+        );
+        assert!(out.contains("PR changes requested"), "got: {out}");
     }
 
     #[test]
