@@ -104,6 +104,78 @@ fn spawn_creates_worktree_and_flow_shows_project() {
 }
 
 #[test]
+fn local_checkpoint_drives_flow_to_review() {
+    // End-to-end Local path (§10/§12): a no-remote repo with a `self-review`
+    // checkpoint keyed on the session ULID renders Review + `PR open`. Also
+    // pins that `s.id.to_string()` matches the checkpoint store's lookup key.
+    let dir = tempfile::tempdir().unwrap();
+    let wt_root = tempfile::tempdir().unwrap();
+    init_git_repo(dir.path());
+
+    circuit(dir.path()).arg("init").assert().success();
+    circuit(dir.path())
+        .args(["spec", "new", "checkout", "--title", "C", "--intent", "Pay."])
+        .assert()
+        .success();
+    circuit(dir.path())
+        .args([
+            "dag",
+            "add-node",
+            "auth-slice",
+            "--spec",
+            "checkout",
+            "--title",
+            "Auth",
+            "--branch",
+            "impl/checkout-auth",
+        ])
+        .assert()
+        .success();
+    circuit(dir.path())
+        .env("CIRCUIT_WORKTREES_DIR", wt_root.path())
+        .args(["session", "spawn", "auth-slice"])
+        .assert()
+        .success();
+
+    // The session ULID is the stored record's filename.
+    let ulid = std::fs::read_dir(dir.path().join(".circuit").join("sessions"))
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().replace(".toml", ""))
+        .next()
+        .expect("a session record was written");
+
+    // Make substantive changes on the branch so the stage passes Project; the
+    // branch is checked out in the worktree at <wt_root>/<ULID>.
+    let wt = wt_root.path().join(&ulid);
+    std::fs::write(wt.join("auth.rs"), "auth code\n").unwrap();
+    let git = |args: &[&str], cwd: &Path| {
+        assert!(Stdcmd::new("git")
+            .arg("-C")
+            .arg(cwd)
+            .args(args)
+            .output()
+            .unwrap()
+            .status
+            .success());
+    };
+    git(&["add", "auth.rs"], &wt);
+    git(&["commit", "-qm", "auth"], &wt);
+
+    // Drop a self-review checkpoint keyed on the ULID.
+    let cp_dir = dir.path().join(".circuit").join("checkpoints");
+    std::fs::create_dir_all(&cp_dir).unwrap();
+    std::fs::write(cp_dir.join(format!("{ulid}.toml")), "state = \"self-review\"\n").unwrap();
+
+    circuit(dir.path())
+        .args(["flow", "auth-slice"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("‹Review›"))
+        .stdout(predicate::str::contains("PR open"));
+}
+
+#[test]
 fn spawn_refuses_to_clobber_an_existing_branch() {
     let dir = tempfile::tempdir().unwrap();
     let wt_root = tempfile::tempdir().unwrap();

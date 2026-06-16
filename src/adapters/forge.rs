@@ -1,6 +1,6 @@
 //! `ForgePort` implemented by shelling out to the `gh` CLI (GitHub). Review
 //! state comes from `gh pr view`; write actions wrap `gh pr create/merge/
-//! update-branch` (Task 4). Forge-unreachable maps to the caller's `None`
+//! update-branch`. Forge-unreachable maps to the caller's `None`
 //! (undeterminable) — never a fake verdict (§5).
 
 use std::path::PathBuf;
@@ -160,7 +160,9 @@ fn merge_args(branch: &str) -> Vec<&str> {
     vec!["pr", "merge", branch, "--merge"]
 }
 
-/// Build the `gh` argv for updating a PR branch from its base.
+/// Build the `gh` argv for updating a PR branch from its base. `gh pr
+/// update-branch` resolves the base from the PR itself, so `_base` is not
+/// forwarded — it stays in the signature to satisfy the `ForgePort` contract.
 fn update_from_base_args<'a>(branch: &'a str, _base: &'a str) -> Vec<&'a str> {
     vec!["pr", "update-branch", branch]
 }
@@ -220,6 +222,12 @@ mod tests {
     #[test]
     fn no_pr_stderr_is_known_none() {
         let r = parse_review_state(Some(1),"", "no pull requests found for branch \"impl/x\"");
+        assert_eq!(r.unwrap(), ReviewState::None);
+    }
+
+    #[test]
+    fn no_pr_stderr_singular_is_known_none() {
+        let r = parse_review_state(Some(1), "", "no pull request found for branch \"x\"");
         assert_eq!(r.unwrap(), ReviewState::None);
     }
 
