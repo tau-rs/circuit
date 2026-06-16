@@ -84,14 +84,16 @@ fn spawn_creates_worktree_and_flow_shows_project() {
         "got: {listing}"
     );
 
-    // flow by DAG-node name shows the Project stage for a fresh branch.
+    // flow by DAG-node name shows the Project stage for a fresh branch. With no
+    // GitHub remote the delivery mode is Local; with no checkpoint file the
+    // review state is a *known* `no PR` (not the undeterminable `PR ?`).
     circuit(dir.path())
         .args(["flow", "auth-slice"])
         .assert()
         .success()
         .stdout(predicate::str::contains("auth-slice  [impl]"))
         .stdout(predicate::str::contains("‹Project›"))
-        .stdout(predicate::str::contains("PR ?"));
+        .stdout(predicate::str::contains("no PR"));
 
     // flow with no arg lists all sessions (the spec + the impl session).
     circuit(dir.path())
