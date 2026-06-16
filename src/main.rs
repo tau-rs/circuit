@@ -428,7 +428,7 @@ fn run_flow(selector: Option<&str>, path: &Path) -> Result<()> {
             view,
             s.branch.as_deref(),
             &facts.branch,
-            None,
+            facts.review,
             Health::Unknown,
         ));
     }
