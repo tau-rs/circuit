@@ -65,19 +65,23 @@ impl Forge {
 /// into a ReviewState. Exit-success with a parseable `STATE|DECISION` line =>
 /// a concrete state. A non-zero exit whose stderr reports no PR => a *known*
 /// `None`. Any other non-zero exit is undeterminable => Err (caller renders
-/// `PR ?`). Pure — fully testable from canned (success, stdout, stderr).
+/// `PR ?`). Pure — fully testable from canned (exit code, stdout, stderr).
+/// `exit_code` is the process exit (`None` if killed by signal); success is
+/// exactly `Some(0)`.
 fn parse_review_state(
-    exit_ok: bool,
+    exit_code: Option<i32>,
     stdout: &str,
     stderr: &str,
 ) -> Result<ReviewState, ForgeError> {
-    if !exit_ok {
+    if exit_code != Some(0) {
         let s = stderr.to_lowercase();
         if s.contains("no pull requests found") || s.contains("no pull request found") {
             return Ok(ReviewState::None);
         }
         return Err(ForgeError::Command {
-            code: "nonzero".to_string(),
+            code: exit_code
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "signal".to_string()),
             stderr: stderr.trim().to_string(),
         });
     }
@@ -89,6 +93,9 @@ fn parse_review_state(
     let review = match state {
         "MERGED" => ReviewState::Merged,
         "CLOSED" => ReviewState::Closed,
+        // `decision` is gh's `reviewDecision`; the catch-all folds the
+        // non-actionable values (`REVIEW_REQUIRED`, `DISMISSED`, null/"") into
+        // a plain open PR. Only APPROVED / CHANGES_REQUESTED change the stage.
         "OPEN" => match decision {
             "APPROVED" => ReviewState::Approved,
             "CHANGES_REQUESTED" => ReviewState::ChangesRequested,
@@ -119,7 +126,7 @@ impl ForgePort for Forge {
         ])?;
         let stdout = String::from_utf8(out.stdout).map_err(ForgeError::Utf8)?;
         let stderr = String::from_utf8_lossy(&out.stderr);
-        parse_review_state(out.status.success(), &stdout, &stderr)
+        parse_review_state(out.status.code(), &stdout, &stderr)
     }
 
     fn create_pr(
@@ -148,7 +155,7 @@ mod tests {
     #[test]
     fn open_no_decision_is_open() {
         assert_eq!(
-            parse_review_state(true, "OPEN|", "").unwrap(),
+            parse_review_state(Some(0),"OPEN|", "").unwrap(),
             ReviewState::Open
         );
     }
@@ -156,7 +163,7 @@ mod tests {
     #[test]
     fn open_review_required_is_open() {
         assert_eq!(
-            parse_review_state(true, "OPEN|REVIEW_REQUIRED", "").unwrap(),
+            parse_review_state(Some(0),"OPEN|REVIEW_REQUIRED", "").unwrap(),
             ReviewState::Open
         );
     }
@@ -164,7 +171,7 @@ mod tests {
     #[test]
     fn open_approved_is_approved() {
         assert_eq!(
-            parse_review_state(true, "OPEN|APPROVED", "").unwrap(),
+            parse_review_state(Some(0),"OPEN|APPROVED", "").unwrap(),
             ReviewState::Approved
         );
     }
@@ -172,7 +179,7 @@ mod tests {
     #[test]
     fn open_changes_requested_is_changes_requested() {
         assert_eq!(
-            parse_review_state(true, "OPEN|CHANGES_REQUESTED", "").unwrap(),
+            parse_review_state(Some(0),"OPEN|CHANGES_REQUESTED", "").unwrap(),
             ReviewState::ChangesRequested
         );
     }
@@ -180,7 +187,7 @@ mod tests {
     #[test]
     fn merged_is_merged() {
         assert_eq!(
-            parse_review_state(true, "MERGED|", "").unwrap(),
+            parse_review_state(Some(0),"MERGED|", "").unwrap(),
             ReviewState::Merged
         );
     }
@@ -188,33 +195,33 @@ mod tests {
     #[test]
     fn closed_is_closed() {
         assert_eq!(
-            parse_review_state(true, "CLOSED|", "").unwrap(),
+            parse_review_state(Some(0),"CLOSED|", "").unwrap(),
             ReviewState::Closed
         );
     }
 
     #[test]
     fn no_pr_stderr_is_known_none() {
-        let r = parse_review_state(false, "", "no pull requests found for branch \"impl/x\"");
+        let r = parse_review_state(Some(1),"", "no pull requests found for branch \"impl/x\"");
         assert_eq!(r.unwrap(), ReviewState::None);
     }
 
     #[test]
     fn other_nonzero_exit_is_error() {
         // Auth/network failure must be undeterminable (Err), NOT a known None.
-        let r = parse_review_state(false, "", "gh: not authenticated");
+        let r = parse_review_state(Some(1),"", "gh: not authenticated");
         assert!(matches!(r, Err(ForgeError::Command { .. })));
     }
 
     #[test]
     fn unknown_state_is_parse_error() {
-        let r = parse_review_state(true, "WAT|", "");
+        let r = parse_review_state(Some(0),"WAT|", "");
         assert!(matches!(r, Err(ForgeError::Parse { .. })));
     }
 
     #[test]
     fn missing_delimiter_is_parse_error() {
-        let r = parse_review_state(true, "OPEN", "");
+        let r = parse_review_state(Some(0),"OPEN", "");
         assert!(matches!(r, Err(ForgeError::Parse { .. })));
     }
 }
