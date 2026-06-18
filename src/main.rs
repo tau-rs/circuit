@@ -8,13 +8,7 @@ use circuit::adapters::forge::Forge;
 use circuit::adapters::git::Git;
 use circuit::adapters::probe::SystemDeliveryProbe;
 use circuit::dag::DagError;
-use circuit::flow::facts::DeliveryFacts;
-use circuit::flow::stage::derive_stage;
-use circuit::model::node::DagNode;
 use circuit::adapters::store::Workspace;
-use circuit::ports::GitPort;
-use circuit::render::dag_board::{self, Board, BoardNode};
-use circuit::session::{SessionId, SessionRecord};
 
 #[derive(Parser)]
 #[command(name = "circuit", about = "Architecture derivation, sessions & flow")]
@@ -309,76 +303,9 @@ fn run_flow(selector: Option<&str>, path: &Path) -> Result<()> {
 fn run_board(spec: &str, path: &Path) -> Result<()> {
     let ws = Workspace::new(path);
     require_initialized(&ws)?;
-    let base = ws.load_config().context("reading config.toml")?.base_branch;
-    let nodes: Vec<DagNode> = ws
-        .list_dag_nodes()
-        .context("reading dag nodes")?
-        .into_iter()
-        .filter(|n| n.spec == spec)
-        .collect();
-    let sessions = ws.list_sessions().context("reading sessions")?;
-
-    // The real git adapter now backs the board, replacing the no-op stub the
-    // board slice shipped before this adapter landed. NOTE: node_health and
-    // traceability each query git per node, so this shells out per node — fine
-    // for M2 board sizes, batchable later if it becomes a cost.
     let git = Git::new(ws.root());
-
-    let mut board_nodes = Vec::new();
-    for n in &nodes {
-        let stage = match git.branch_facts(&n.branch, &base) {
-            Ok(branch) => {
-                let session = sessions
-                    .iter()
-                    .find(|s| s.dag_node.as_deref() == Some(n.id.as_str()))
-                    .cloned()
-                    // derive_stage ignores the session in M2, so a synthesized
-                    // record (with a throwaway id, never rendered) is sound here.
-                    .unwrap_or_else(|| {
-                        SessionRecord::impl_(SessionId::generate(), &n.spec, &n.id, &n.branch)
-                    });
-                let facts = DeliveryFacts {
-                    branch,
-                    review: None,
-                };
-                Some(derive_stage(&session, &facts))
-            }
-            Err(_) => None,
-        };
-        let health = circuit::cockpit::rollup::node_health(&git, &n.branch);
-        board_nodes.push(BoardNode {
-            id: n.id.clone(),
-            depends_on: n.depends_on.clone(),
-            stage,
-            health,
-        });
-    }
-
-    let board = Board { nodes: board_nodes };
-    print!("{}", dag_board::render(&board));
-
-    // Per-node readout, sorted by id (matches the board's node order).
-    println!("\n--- nodes ---");
-    let mut sorted: Vec<&BoardNode> = board.nodes.iter().collect();
-    sorted.sort_by(|a, b| a.id.cmp(&b.id));
-    let healths: Vec<_> = sorted.iter().map(|n| n.health).collect();
-    for n in &sorted {
-        println!(
-            "  {}  {}  {}",
-            n.id,
-            dag_board::stage_cell(&n.stage),
-            dag_board::glyph(n.health)
-        );
-    }
-
-    let spec_health = circuit::cockpit::health::rollup_children(&healths);
-    let trace = circuit::cockpit::rollup::traceability(&git, &nodes, &base);
-    let m = trace
-        .merged
-        .map(|count| count.to_string())
-        .unwrap_or_else(|| "?".to_string());
-    println!("\nSpec health: {}", dag_board::glyph(spec_health));
-    println!("Tasks: {}/{} done", m, trace.total);
+    let out = circuit::app::board(&ws, &ws, &ws, &git, spec)?;
+    println!("{out}");
     Ok(())
 }
 

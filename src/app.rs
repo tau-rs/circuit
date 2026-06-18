@@ -2,6 +2,7 @@
 //! ports it needs and returns domain/view values; `main.rs` does all printing.
 //! No clap, no filesystem, no shell-outs here.
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
@@ -155,6 +156,50 @@ pub fn resolve_session<Se: SessionRepo>(sessions: &Se, selector: &str) -> anyhow
         0 => anyhow::bail!("no session matches `{selector}` (not a known session id or DAG-node name)"),
         n => anyhow::bail!("`{selector}` matches {n} sessions — pass the session id (ULID) to disambiguate"),
     }
+}
+
+use crate::render::dag_board::{self, Board, BoardNode};
+
+/// Render the spec-level DAG board. Returns the text to print (no trailing newline).
+pub fn board<S, D, Se, G>(
+    settings: &S, dag_repo: &D, sessions_repo: &Se, git: &G, spec: &str,
+) -> anyhow::Result<String>
+where S: SettingsRepo, D: DagRepo, Se: SessionRepo, G: GitPort {
+    require_initialized(settings)?;
+    let base = settings.load_config().context("reading config.toml")?.base_branch;
+    let nodes: Vec<DagNode> = dag_repo.list_dag_nodes().context("reading dag nodes")?
+        .into_iter().filter(|n| n.spec == spec).collect();
+    let sessions = sessions_repo.list_sessions().context("reading sessions")?;
+    let mut board_nodes = Vec::new();
+    for n in &nodes {
+        let stage = match git.branch_facts(&n.branch, &base) {
+            Ok(branch) => {
+                let session = sessions.iter().find(|s| s.dag_node.as_deref() == Some(n.id.as_str())).cloned()
+                    .unwrap_or_else(|| SessionRecord::impl_(SessionId::generate(), &n.spec, &n.id, &n.branch));
+                let facts = DeliveryFacts { branch, review: None };
+                Some(derive_stage(&session, &facts))
+            }
+            Err(_) => None,
+        };
+        let health = crate::cockpit::rollup::node_health(git, &n.branch);
+        board_nodes.push(BoardNode { id: n.id.clone(), depends_on: n.depends_on.clone(), stage, health });
+    }
+    let board = Board { nodes: board_nodes };
+    let mut out = String::new();
+    write!(out, "{}", dag_board::render(&board)).unwrap();
+    out.push_str("\n--- nodes ---\n");
+    let mut sorted: Vec<&BoardNode> = board.nodes.iter().collect();
+    sorted.sort_by(|a, b| a.id.cmp(&b.id));
+    let healths: Vec<_> = sorted.iter().map(|n| n.health).collect();
+    for n in &sorted {
+        writeln!(out, "  {}  {}  {}", n.id, dag_board::stage_cell(&n.stage), dag_board::glyph(n.health)).unwrap();
+    }
+    let spec_health = crate::cockpit::health::rollup_children(&healths);
+    let trace = crate::cockpit::rollup::traceability(git, &nodes, &base);
+    let m = trace.merged.map(|count| count.to_string()).unwrap_or_else(|| "?".to_string());
+    write!(out, "\nSpec health: {}\n", dag_board::glyph(spec_health)).unwrap();
+    write!(out, "Tasks: {}/{} done", m, trace.total).unwrap();
+    Ok(out)
 }
 
 /// Render the flow rail for one session or all. Returns the text to print.
@@ -316,6 +361,15 @@ mod tests {
     fn resolve_session_unknown_errs() {
         let store = MemStore { initialized: true, ..Default::default() };
         assert!(resolve_session(&store, "nope").is_err());
+    }
+
+    #[test]
+    fn board_empty_spec_has_health_and_tasks_lines() {
+        let store = MemStore { initialized: true, ..Default::default() };
+        let git = crate::adapters::git::Git::new(".");
+        let out = board(&store, &store, &store, &git, "nonexistent-spec").unwrap();
+        assert!(out.contains("Spec health"));
+        assert!(out.contains("Tasks:"));
     }
 
     #[test]
