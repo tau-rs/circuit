@@ -114,7 +114,9 @@ fn local_checkpoint_drives_flow_to_review() {
 
     circuit(dir.path()).arg("init").assert().success();
     circuit(dir.path())
-        .args(["spec", "new", "checkout", "--title", "C", "--intent", "Pay."])
+        .args([
+            "spec", "new", "checkout", "--title", "C", "--intent", "Pay.",
+        ])
         .assert()
         .success();
     circuit(dir.path())
@@ -165,7 +167,11 @@ fn local_checkpoint_drives_flow_to_review() {
     // Drop a self-review checkpoint keyed on the ULID.
     let cp_dir = dir.path().join(".circuit").join("checkpoints");
     std::fs::create_dir_all(&cp_dir).unwrap();
-    std::fs::write(cp_dir.join(format!("{ulid}.toml")), "state = \"self-review\"\n").unwrap();
+    std::fs::write(
+        cp_dir.join(format!("{ulid}.toml")),
+        "state = \"self-review\"\n",
+    )
+    .unwrap();
 
     circuit(dir.path())
         .args(["flow", "auth-slice"])

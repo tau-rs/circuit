@@ -7,8 +7,8 @@ use circuit::adapters::checkpoints::Checkpoints;
 use circuit::adapters::forge::Forge;
 use circuit::adapters::git::Git;
 use circuit::adapters::probe::SystemDeliveryProbe;
-use circuit::dag::DagError;
 use circuit::adapters::store::Workspace;
+use circuit::dag::DagError;
 
 #[derive(Parser)]
 #[command(name = "circuit", about = "Architecture derivation, sessions & flow")]
@@ -246,8 +246,12 @@ fn run_session_spawn(dag_node: &str, path: &Path) -> Result<()> {
     require_initialized(&ws)?;
     let git = Git::new(ws.root());
     let env = std::env::var("CIRCUIT_WORKTREES_DIR").ok();
-    let out = circuit::app::session_spawn(&ws, &ws, &ws, &git, dag_node, env.as_deref(), ws.root())?;
-    println!("Spawned session {} for node {} (stage: Project)", out.session_id, out.dag_node);
+    let out =
+        circuit::app::session_spawn(&ws, &ws, &ws, &git, dag_node, env.as_deref(), ws.root())?;
+    println!(
+        "Spawned session {} for node {} (stage: Project)",
+        out.session_id, out.dag_node
+    );
     println!("  branch:   {}", out.branch);
     println!("  worktree: {}", out.worktree.display());
     Ok(())

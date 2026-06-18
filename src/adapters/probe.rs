@@ -20,11 +20,19 @@ impl SystemDeliveryProbe {
 
 impl DeliveryProbe for SystemDeliveryProbe {
     fn gh_available(&self) -> bool {
-        Command::new("gh").arg("--version").output()
-            .map(|o| o.status.success()).unwrap_or(false)
+        Command::new("gh")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
     }
     fn has_github_remote(&self) -> bool {
-        Command::new("git").arg("-C").arg(&self.root).args(["remote", "-v"]).output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).contains("github.com")).unwrap_or(false)
+        Command::new("git")
+            .arg("-C")
+            .arg(&self.root)
+            .args(["remote", "-v"])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).contains("github.com"))
+            .unwrap_or(false)
     }
 }

@@ -149,7 +149,12 @@ impl ForgePort for Forge {
 }
 
 /// Build the `gh` argv for opening a PR. Pure — asserted in tests.
-fn create_pr_args<'a>(branch: &'a str, base: &'a str, title: &'a str, body: &'a str) -> Vec<&'a str> {
+fn create_pr_args<'a>(
+    branch: &'a str,
+    base: &'a str,
+    title: &'a str,
+    body: &'a str,
+) -> Vec<&'a str> {
     vec![
         "pr", "create", "--head", branch, "--base", base, "--title", title, "--body", body,
     ]
@@ -174,7 +179,7 @@ mod tests {
     #[test]
     fn open_no_decision_is_open() {
         assert_eq!(
-            parse_review_state(Some(0),"OPEN|", "").unwrap(),
+            parse_review_state(Some(0), "OPEN|", "").unwrap(),
             ReviewState::Open
         );
     }
@@ -182,7 +187,7 @@ mod tests {
     #[test]
     fn open_review_required_is_open() {
         assert_eq!(
-            parse_review_state(Some(0),"OPEN|REVIEW_REQUIRED", "").unwrap(),
+            parse_review_state(Some(0), "OPEN|REVIEW_REQUIRED", "").unwrap(),
             ReviewState::Open
         );
     }
@@ -190,7 +195,7 @@ mod tests {
     #[test]
     fn open_approved_is_approved() {
         assert_eq!(
-            parse_review_state(Some(0),"OPEN|APPROVED", "").unwrap(),
+            parse_review_state(Some(0), "OPEN|APPROVED", "").unwrap(),
             ReviewState::Approved
         );
     }
@@ -198,7 +203,7 @@ mod tests {
     #[test]
     fn open_changes_requested_is_changes_requested() {
         assert_eq!(
-            parse_review_state(Some(0),"OPEN|CHANGES_REQUESTED", "").unwrap(),
+            parse_review_state(Some(0), "OPEN|CHANGES_REQUESTED", "").unwrap(),
             ReviewState::ChangesRequested
         );
     }
@@ -206,7 +211,7 @@ mod tests {
     #[test]
     fn merged_is_merged() {
         assert_eq!(
-            parse_review_state(Some(0),"MERGED|", "").unwrap(),
+            parse_review_state(Some(0), "MERGED|", "").unwrap(),
             ReviewState::Merged
         );
     }
@@ -214,14 +219,14 @@ mod tests {
     #[test]
     fn closed_is_closed() {
         assert_eq!(
-            parse_review_state(Some(0),"CLOSED|", "").unwrap(),
+            parse_review_state(Some(0), "CLOSED|", "").unwrap(),
             ReviewState::Closed
         );
     }
 
     #[test]
     fn no_pr_stderr_is_known_none() {
-        let r = parse_review_state(Some(1),"", "no pull requests found for branch \"impl/x\"");
+        let r = parse_review_state(Some(1), "", "no pull requests found for branch \"impl/x\"");
         assert_eq!(r.unwrap(), ReviewState::None);
     }
 
@@ -234,19 +239,19 @@ mod tests {
     #[test]
     fn other_nonzero_exit_is_error() {
         // Auth/network failure must be undeterminable (Err), NOT a known None.
-        let r = parse_review_state(Some(1),"", "gh: not authenticated");
+        let r = parse_review_state(Some(1), "", "gh: not authenticated");
         assert!(matches!(r, Err(ForgeError::Command { .. })));
     }
 
     #[test]
     fn unknown_state_is_parse_error() {
-        let r = parse_review_state(Some(0),"WAT|", "");
+        let r = parse_review_state(Some(0), "WAT|", "");
         assert!(matches!(r, Err(ForgeError::Parse { .. })));
     }
 
     #[test]
     fn missing_delimiter_is_parse_error() {
-        let r = parse_review_state(Some(0),"OPEN", "");
+        let r = parse_review_state(Some(0), "OPEN", "");
         assert!(matches!(r, Err(ForgeError::Parse { .. })));
     }
 
@@ -256,18 +261,26 @@ mod tests {
         assert_eq!(
             a,
             vec![
-                "pr", "create",
-                "--head", "impl/x",
-                "--base", "main",
-                "--title", "Add x",
-                "--body", "body text",
+                "pr",
+                "create",
+                "--head",
+                "impl/x",
+                "--base",
+                "main",
+                "--title",
+                "Add x",
+                "--body",
+                "body text",
             ]
         );
     }
 
     #[test]
     fn merge_args_use_merge_strategy() {
-        assert_eq!(merge_args("impl/x"), vec!["pr", "merge", "impl/x", "--merge"]);
+        assert_eq!(
+            merge_args("impl/x"),
+            vec!["pr", "merge", "impl/x", "--merge"]
+        );
     }
 
     #[test]
