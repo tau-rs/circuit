@@ -202,6 +202,27 @@ where S: SettingsRepo, D: DagRepo, Se: SessionRepo, G: GitPort {
     Ok(out)
 }
 
+/// Analyze a Rust source tree: architecture indicators + mermaid diagram.
+/// Returns the full report text (no final trailing newline; `main.rs` adds one
+/// via `println!`).
+pub fn analyze(path: &std::path::Path) -> anyhow::Result<String> {
+    let graph = crate::builder::build_graph(path)?;
+    let cycles = crate::indicators::cycles::find_cycles(&graph);
+    let violations = crate::indicators::dependency_rule::violations(&graph);
+    let mut out = String::new();
+    writeln!(out, "Architecture — No-cycles (ADP): {}",
+        if cycles.is_empty() { "● SOUND".to_string() } else { format!("⛔ {} cyclic group(s)", cycles.len()) }).unwrap();
+    for c in &cycles { writeln!(out, "  cycle: {}", c.join(" → ")).unwrap(); }
+    writeln!(out, "Architecture — Dependency rule: {}",
+        if violations.is_empty() { "● SOUND".to_string() } else { format!("⛔ {} violation(s)", violations.len()) }).unwrap();
+    for v in &violations {
+        writeln!(out, "  {} ({:?}) → {} ({:?})  VIOLATION", v.from, v.from_layer, v.to, v.to_layer).unwrap();
+    }
+    writeln!(out, "\n--- mermaid ---").unwrap();
+    write!(out, "{}", crate::render::mermaid::render(&graph, &violations, &cycles)).unwrap();
+    Ok(out)
+}
+
 /// Render the flow rail for one session or all. Returns the text to print.
 #[allow(clippy::too_many_arguments)]
 pub fn flow<S, Se, G, F, C, P>(
@@ -240,6 +261,13 @@ where S: SettingsRepo, Se: SessionRepo, G: GitPort, F: ForgePort, C: CheckpointS
 mod tests {
     use super::*;
     use crate::app::fakes::MemStore;
+
+    #[test]
+    fn analyze_self_emits_report_with_mermaid() {
+        let out = analyze(std::path::Path::new("src")).unwrap();
+        assert!(out.contains("Architecture — Dependency rule:"));
+        assert!(out.contains("--- mermaid ---"));
+    }
 
     #[test]
     fn init_on_fresh_store_reports_initialized() {
