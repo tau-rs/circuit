@@ -4,10 +4,12 @@
 
 use anyhow::Context;
 
+use crate::dag::{self, DagError};
 use crate::model::config::Config;
 use crate::model::glossary::Glossary;
+use crate::model::node::DagNode;
 use crate::model::spec::SpecRecord;
-use crate::ports::{SettingsRepo, SpecRepo};
+use crate::ports::{DagRepo, SettingsRepo, SpecRepo};
 
 /// Outcome of `init`, so `main.rs` can print the right line.
 pub enum InitOutcome {
@@ -51,6 +53,48 @@ pub fn init<S: SettingsRepo>(settings: &S) -> anyhow::Result<InitOutcome> {
     Ok(InitOutcome::Initialized)
 }
 
+pub fn dag_add_node<S: SettingsRepo, R: DagRepo>(
+    settings: &S,
+    dag_repo: &R,
+    id: &str,
+    spec: String,
+    title: String,
+    branch: String,
+    intent: String,
+    depends_on: Vec<String>,
+) -> anyhow::Result<()> {
+    require_initialized(settings)?;
+    let mut node = DagNode::new(id, spec, title, branch);
+    node.intent = intent;
+    node.depends_on = depends_on;
+    dag_repo.save_dag_node(&node).with_context(|| format!("writing dag node {id}"))?;
+    Ok(())
+}
+
+pub fn dag_link<S: SettingsRepo, R: DagRepo>(
+    settings: &S,
+    dag_repo: &R,
+    from: &str,
+    to: &str,
+) -> anyhow::Result<()> {
+    require_initialized(settings)?;
+    let mut node = dag_repo
+        .load_dag_node(from)
+        .with_context(|| format!("loading dag node {from}"))?;
+    if !node.depends_on.contains(&to.to_string()) {
+        node.depends_on.push(to.to_string());
+    }
+    dag_repo.save_dag_node(&node).with_context(|| format!("writing dag node {from}"))?;
+    Ok(())
+}
+
+/// Validate the whole DAG; returns the error list plus the node count.
+pub fn dag_check<R: DagRepo>(dag_repo: &R) -> anyhow::Result<(Vec<DagError>, usize)> {
+    let nodes = dag_repo.list_dag_nodes().context("reading dag nodes")?;
+    let count = nodes.len();
+    Ok((dag::validate(&nodes), count))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -81,6 +125,35 @@ mod tests {
         spec_new(&store, &store, "checkout", "Checkout".into(), "Pay.".into(), vec!["billing".into()]).unwrap();
         let saved = store.specs.borrow().get("checkout").cloned().unwrap();
         assert_eq!(saved.bounded_contexts, vec!["billing".to_string()]);
+    }
+
+    #[test]
+    fn dag_add_node_saves_with_deps() {
+        let store = MemStore { initialized: true, ..Default::default() };
+        dag_add_node(&store, &store, "auth", "checkout".into(), "Auth".into(),
+            "impl/auth".into(), "do auth".into(), vec!["base".into()]).unwrap();
+        let n = store.nodes.borrow().get("auth").cloned().unwrap();
+        assert_eq!(n.branch, "impl/auth");
+        assert_eq!(n.depends_on, vec!["base".to_string()]);
+    }
+
+    #[test]
+    fn dag_link_appends_dependency_once() {
+        let store = MemStore { initialized: true, ..Default::default() };
+        dag_add_node(&store, &store, "a", "s".into(), "A".into(), "impl/a".into(), "".into(), vec![]).unwrap();
+        dag_link(&store, &store, "a", "b").unwrap();
+        dag_link(&store, &store, "a", "b").unwrap();
+        let n = store.nodes.borrow().get("a").cloned().unwrap();
+        assert_eq!(n.depends_on, vec!["b".to_string()]);
+    }
+
+    #[test]
+    fn dag_check_returns_validation_errors() {
+        let store = MemStore { initialized: true, ..Default::default() };
+        dag_add_node(&store, &store, "a", "s".into(), "A".into(), "impl/a".into(), "".into(), vec!["ghost".into()]).unwrap();
+        let (errs, count) = dag_check(&store).unwrap();
+        assert_eq!(count, 1);
+        assert!(!errs.is_empty());
     }
 }
 

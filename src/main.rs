@@ -8,7 +8,7 @@ use circuit::adapters::delivery::{self, DeliveryMode};
 use circuit::adapters::forge::Forge;
 use circuit::adapters::git::Git;
 use circuit::cockpit::health::Health;
-use circuit::dag::{validate, DagError};
+use circuit::dag::DagError;
 use circuit::flow::facts::DeliveryFacts;
 use circuit::flow::rail::render_rail;
 use circuit::flow::stage::derive_stage;
@@ -245,34 +245,22 @@ fn run_dag(command: DagCommand) -> Result<()> {
         } => {
             let ws = Workspace::new(&path);
             require_initialized(&ws)?;
-            let mut node = DagNode::new(&id, spec, title, branch);
-            node.intent = intent;
-            node.depends_on = depends_on;
-            ws.save_dag_node(&node)
-                .with_context(|| format!("writing dag node {id}"))?;
+            circuit::app::dag_add_node(&ws, &ws, &id, spec, title, branch, intent, depends_on)?;
             println!("Added DAG node: {id}");
             Ok(())
         }
         DagCommand::Link { from, to, path } => {
             let ws = Workspace::new(&path);
             require_initialized(&ws)?;
-            let mut node = ws
-                .load_dag_node(&from)
-                .with_context(|| format!("loading dag node {from}"))?;
-            if !node.depends_on.contains(&to) {
-                node.depends_on.push(to.clone());
-            }
-            ws.save_dag_node(&node)
-                .with_context(|| format!("writing dag node {from}"))?;
+            circuit::app::dag_link(&ws, &ws, &from, &to)?;
             println!("Linked {from} → {to}");
             Ok(())
         }
         DagCommand::Check { path } => {
             let ws = Workspace::new(&path);
-            let nodes = ws.list_dag_nodes().context("reading dag nodes")?;
-            let errors = validate(&nodes);
+            let (errors, count) = circuit::app::dag_check(&ws)?;
             if errors.is_empty() {
-                println!("DAG sound — {} node(s), no problems", nodes.len());
+                println!("DAG sound — {count} node(s), no problems");
                 return Ok(());
             }
             for e in &errors {
