@@ -7,9 +7,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 
-use crate::adapters::delivery::{self, DeliveryMode};
 use crate::cockpit::health::Health;
 use crate::dag::{self, DagError};
+use crate::flow::delivery::{self, DeliveryMode};
 use crate::flow::facts::DeliveryFacts;
 use crate::flow::rail::render_rail;
 use crate::flow::stage::derive_stage;
@@ -22,6 +22,7 @@ use crate::ports::{
     CheckpointStore, DagRepo, DeliveryProbe, ForgePort, GitPort, SessionRepo, SettingsRepo,
     SpecRepo,
 };
+use crate::render::dag_board::{self, Board, BoardNode};
 use crate::session::{SessionId, SessionRecord};
 
 /// Outcome of `init`, so `main.rs` can print the right line.
@@ -203,8 +204,6 @@ pub fn resolve_session<Se: SessionRepo>(
         ),
     }
 }
-
-use crate::render::dag_board::{self, Board, BoardNode};
 
 /// Render the spec-level DAG board. Returns the text to print (no trailing newline).
 pub fn board<S, D, Se, G>(
@@ -651,8 +650,9 @@ mod tests {
             initialized: true,
             ..Default::default()
         };
-        let git = crate::adapters::git::Git::new(".");
-        let out = board(&store, &store, &store, &git, "nonexistent-spec").unwrap();
+        // No nodes match the spec, so git is never consulted — use the fake
+        // to keep the test free of any dependency on the local `.` being a repo.
+        let out = board(&store, &store, &store, &NoopGit, "nonexistent-spec").unwrap();
         assert!(out.contains("Spec health"));
         assert!(out.contains("Tasks:"));
     }
