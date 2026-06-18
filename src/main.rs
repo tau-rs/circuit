@@ -4,17 +4,15 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
 use circuit::adapters::checkpoints::Checkpoints;
-use circuit::adapters::delivery::{self, DeliveryMode};
 use circuit::adapters::forge::Forge;
 use circuit::adapters::git::Git;
-use circuit::cockpit::health::Health;
+use circuit::adapters::probe::SystemDeliveryProbe;
 use circuit::dag::DagError;
 use circuit::flow::facts::DeliveryFacts;
-use circuit::flow::rail::render_rail;
 use circuit::flow::stage::derive_stage;
 use circuit::model::node::DagNode;
 use circuit::adapters::store::Workspace;
-use circuit::ports::{CheckpointStore, ForgePort, GitPort};
+use circuit::ports::GitPort;
 use circuit::render::dag_board::{self, Board, BoardNode};
 use circuit::session::{SessionId, SessionRecord};
 
@@ -296,111 +294,16 @@ fn run_session_spawn(dag_node: &str, path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Is the `gh` CLI installed and runnable? (Auth is checked per-call via the
-/// review_state error path; this only gates which source we consult.)
-fn gh_available() -> bool {
-    std::process::Command::new("gh")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
-
-/// Does the repo at `root` have a remote pointing at github.com?
-fn has_github_remote(root: &Path) -> bool {
-    std::process::Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["remote", "-v"])
-        .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).contains("github.com"))
-        .unwrap_or(false)
-}
-
-/// Render the rail for one session (by ULID, else by unique DAG-node name) or,
-/// when `selector` is `None`, every session in the workspace.
 fn run_flow(selector: Option<&str>, path: &Path) -> Result<()> {
     let ws = Workspace::new(path);
     require_initialized(&ws)?;
-
-    let sessions = match selector {
-        Some(sel) => vec![resolve_session(&ws, sel)?],
-        None => ws.list_sessions().context("listing sessions")?,
-    };
-
-    if sessions.is_empty() {
-        println!("No sessions yet.");
-        return Ok(());
-    }
-
-    let config = ws.load_config().context("loading config.toml")?;
     let git = Git::new(ws.root());
-    let mode = delivery::resolve(gh_available(), has_github_remote(ws.root()));
     let forge = Forge::new(ws.root());
     let checkpoints = Checkpoints::new(ws.root());
-
-    let mut blocks = Vec::new();
-    for s in &sessions {
-        let branch_facts = match &s.branch {
-            Some(b) => git
-                .branch_facts(b, &config.base_branch)
-                .with_context(|| format!("deriving facts for {b}"))?,
-            None => Default::default(),
-        };
-        // Resolve real review state from the selected source. Any adapter Err
-        // (forge unreachable, unreadable checkpoint) degrades to `None` —
-        // the honest "undeterminable" path that renders `PR ?` (§7.2).
-        let review = match (&s.branch, mode) {
-            (Some(b), DeliveryMode::Forge) => forge.review_state(b).ok(),
-            (Some(_), DeliveryMode::Local) => {
-                checkpoints.review_state(&s.id.to_string()).ok()
-            }
-            (None, _) => None,
-        };
-        let facts = DeliveryFacts {
-            branch: branch_facts,
-            review,
-        };
-        let view = derive_stage(s, &facts);
-        // Label by DAG node when present (impl/fix), else by session id (spec).
-        let label = s.dag_node.clone().unwrap_or_else(|| s.id.to_string());
-        blocks.push(render_rail(
-            &label,
-            s.kind,
-            view,
-            s.branch.as_deref(),
-            &facts.branch,
-            facts.review,
-            Health::Unknown,
-        ));
-    }
-    println!("{}", blocks.join("\n\n"));
+    let probe = SystemDeliveryProbe::new(ws.root());
+    let out = circuit::app::flow(&ws, &ws, &git, &forge, &checkpoints, &probe, selector)?;
+    println!("{out}");
     Ok(())
-}
-
-/// Resolve a session selector: first as a ULID, then as a unique DAG-node name.
-fn resolve_session(ws: &Workspace, selector: &str) -> Result<SessionRecord> {
-    // Exact ULID match.
-    if selector.parse::<SessionId>().is_ok() {
-        if let Ok(s) = ws.load_session(selector) {
-            return Ok(s);
-        }
-    }
-    // Fall back to a unique DAG-node-name match.
-    let all = ws.list_sessions().context("listing sessions")?;
-    let mut matches: Vec<SessionRecord> = all
-        .into_iter()
-        .filter(|s| s.dag_node.as_deref() == Some(selector))
-        .collect();
-    match matches.len() {
-        1 => Ok(matches.pop().unwrap()),
-        0 => anyhow::bail!(
-            "no session matches `{selector}` (not a known session id or DAG-node name)"
-        ),
-        n => anyhow::bail!(
-            "`{selector}` matches {n} sessions — pass the session id (ULID) to disambiguate"
-        ),
-    }
 }
 
 fn run_board(spec: &str, path: &Path) -> Result<()> {

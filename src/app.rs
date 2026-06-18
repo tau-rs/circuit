@@ -6,13 +6,18 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 
+use crate::adapters::delivery::{self, DeliveryMode};
+use crate::cockpit::health::Health;
 use crate::dag::{self, DagError};
+use crate::flow::facts::DeliveryFacts;
+use crate::flow::rail::render_rail;
+use crate::flow::stage::derive_stage;
 use crate::model::config::Config;
 use crate::model::glossary::Glossary;
 use crate::model::local::resolve_worktree_dir;
 use crate::model::node::DagNode;
 use crate::model::spec::SpecRecord;
-use crate::ports::{DagRepo, GitPort, SessionRepo, SettingsRepo, SpecRepo};
+use crate::ports::{CheckpointStore, DagRepo, DeliveryProbe, ForgePort, GitPort, SessionRepo, SettingsRepo, SpecRepo};
 use crate::session::{SessionId, SessionRecord};
 
 /// Outcome of `init`, so `main.rs` can print the right line.
@@ -135,6 +140,57 @@ where S: SettingsRepo, D: DagRepo, Se: SessionRepo, G: GitPort {
     })
 }
 
+/// Resolve a selector: exact ULID, else a unique DAG-node-name match.
+pub fn resolve_session<Se: SessionRepo>(sessions: &Se, selector: &str) -> anyhow::Result<SessionRecord> {
+    if selector.parse::<SessionId>().is_ok() {
+        if let Ok(s) = sessions.load_session(selector) {
+            return Ok(s);
+        }
+    }
+    let all = sessions.list_sessions().context("listing sessions")?;
+    let mut matches: Vec<SessionRecord> = all.into_iter()
+        .filter(|s| s.dag_node.as_deref() == Some(selector)).collect();
+    match matches.len() {
+        1 => Ok(matches.pop().unwrap()),
+        0 => anyhow::bail!("no session matches `{selector}` (not a known session id or DAG-node name)"),
+        n => anyhow::bail!("`{selector}` matches {n} sessions — pass the session id (ULID) to disambiguate"),
+    }
+}
+
+/// Render the flow rail for one session or all. Returns the text to print.
+#[allow(clippy::too_many_arguments)]
+pub fn flow<S, Se, G, F, C, P>(
+    settings: &S, sessions: &Se, git: &G, forge: &F, checkpoints: &C, probe: &P, selector: Option<&str>,
+) -> anyhow::Result<String>
+where S: SettingsRepo, Se: SessionRepo, G: GitPort, F: ForgePort, C: CheckpointStore, P: DeliveryProbe {
+    let sessions_list = match selector {
+        Some(sel) => vec![resolve_session(sessions, sel)?],
+        None => sessions.list_sessions().context("listing sessions")?,
+    };
+    if sessions_list.is_empty() {
+        return Ok("No sessions yet.".to_string());
+    }
+    let config = settings.load_config().context("loading config.toml")?;
+    let mode = delivery::resolve(probe.gh_available(), probe.has_github_remote());
+    let mut blocks = Vec::new();
+    for s in &sessions_list {
+        let branch_facts = match &s.branch {
+            Some(b) => git.branch_facts(b, &config.base_branch).with_context(|| format!("deriving facts for {b}"))?,
+            None => Default::default(),
+        };
+        let review = match (&s.branch, mode) {
+            (Some(b), DeliveryMode::Forge) => forge.review_state(b).ok(),
+            (Some(_), DeliveryMode::Local) => checkpoints.review_state(&s.id.to_string()).ok(),
+            (None, _) => None,
+        };
+        let facts = DeliveryFacts { branch: branch_facts, review };
+        let view = derive_stage(s, &facts);
+        let label = s.dag_node.clone().unwrap_or_else(|| s.id.to_string());
+        blocks.push(render_rail(&label, s.kind, view, s.branch.as_deref(), &facts.branch, facts.review, Health::Unknown));
+    }
+    Ok(blocks.join("\n\n"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -205,6 +261,61 @@ mod tests {
         fn create_branch(&self, _b: &str, _base: &str) -> Result<(), Self::Error> { Ok(()) }
         fn add_worktree(&self, _b: &str, _p: &std::path::Path) -> Result<(), Self::Error> { Ok(()) }
         fn list_worktrees(&self) -> Result<Vec<crate::ports::Worktree>, Self::Error> { Ok(vec![]) }
+    }
+
+    struct NoopGit;
+    impl crate::ports::GitPort for NoopGit {
+        type Error = crate::app::fakes::FakeErr;
+        fn branch_facts(&self, _b: &str, _base: &str) -> Result<crate::flow::facts::BranchFacts, Self::Error> {
+            Ok(Default::default())
+        }
+        fn create_branch(&self, _b: &str, _base: &str) -> Result<(), Self::Error> { Ok(()) }
+        fn add_worktree(&self, _b: &str, _p: &std::path::Path) -> Result<(), Self::Error> { Ok(()) }
+        fn list_worktrees(&self) -> Result<Vec<crate::ports::Worktree>, Self::Error> { Ok(vec![]) }
+    }
+    struct NoopForge;
+    impl crate::ports::ForgePort for NoopForge {
+        type Error = crate::app::fakes::FakeErr;
+        fn review_state(&self, _b: &str) -> Result<crate::flow::facts::ReviewState, Self::Error> {
+            Err(crate::app::fakes::FakeErr("no forge".into()))
+        }
+        fn create_pr(&self, _b: &str, _base: &str, _t: &str, _body: &str) -> Result<(), Self::Error> { Ok(()) }
+        fn merge(&self, _b: &str) -> Result<(), Self::Error> { Ok(()) }
+        fn update_from_base(&self, _b: &str, _base: &str) -> Result<(), Self::Error> { Ok(()) }
+    }
+    struct NoopCheckpoints;
+    impl crate::ports::CheckpointStore for NoopCheckpoints {
+        type Error = crate::app::fakes::FakeErr;
+        fn review_state(&self, _s: &str) -> Result<crate::flow::facts::ReviewState, Self::Error> {
+            Ok(crate::flow::facts::ReviewState::None)
+        }
+    }
+
+    #[test]
+    fn flow_empty_store_says_no_sessions() {
+        let store = MemStore { initialized: true, ..Default::default() };
+        let probe = crate::app::fakes::FakeProbe { gh: false, remote: false };
+        let out = flow(&store, &store, &NoopGit, &NoopForge, &NoopCheckpoints, &probe, None).unwrap();
+        assert_eq!(out, "No sessions yet.");
+    }
+
+    fn impl_session(node: &str) -> SessionRecord {
+        SessionRecord::impl_(SessionId::generate(), "spec", node, &format!("impl/{node}"))
+    }
+
+    #[test]
+    fn resolve_session_by_dag_node_name() {
+        let store = MemStore { initialized: true, ..Default::default() };
+        let s = impl_session("auth");
+        store.sessions.borrow_mut().insert(s.id.to_string(), s.clone());
+        let got = resolve_session(&store, "auth").unwrap();
+        assert_eq!(got.dag_node.as_deref(), Some("auth"));
+    }
+
+    #[test]
+    fn resolve_session_unknown_errs() {
+        let store = MemStore { initialized: true, ..Default::default() };
+        assert!(resolve_session(&store, "nope").is_err());
     }
 
     #[test]
