@@ -295,9 +295,7 @@ mod tests {
     fn v1_record_without_status_parses_as_active() {
         // A slice-0/A/B record predates the `status` field. It must load as
         // Active (back-compat via #[serde(default)]).
-        let text = format!(
-            "schema_version = 1\nid = \"{SAMPLE_ULID}\"\nkind = \"spec\"\n"
-        );
+        let text = format!("schema_version = 1\nid = \"{SAMPLE_ULID}\"\nkind = \"spec\"\n");
         let s: SessionRecord = toml::from_str(&text).unwrap();
         assert_eq!(s.status, SessionStatus::Active);
         assert!(!s.is_archived());

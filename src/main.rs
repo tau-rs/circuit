@@ -435,7 +435,10 @@ fn run_session_archive(id: &str, delete_branch: bool, force: bool, path: &Path) 
     ws.save_session(&record)
         .with_context(|| format!("saving archived session {}", record.id))?;
 
-    println!("Session {} archived — agent session may now end.", record.id);
+    println!(
+        "Session {} archived — agent session may now end.",
+        record.id
+    );
     match (&record.branch, delete_branch) {
         (Some(b), true) => println!("  branch {b} deleted"),
         (Some(b), false) => println!("  branch {b} kept (use --delete-branch to remove)"),
@@ -552,9 +555,7 @@ fn run_flow(selector: Option<&str>, all: bool, path: &Path) -> Result<()> {
         // the honest "undeterminable" path that renders `PR ?` (§7.2).
         let review = match (&s.branch, mode) {
             (Some(b), DeliveryMode::Forge) => forge.review_state(b).ok(),
-            (Some(_), DeliveryMode::Local) => {
-                checkpoints.review_state(&s.id.to_string()).ok()
-            }
+            (Some(_), DeliveryMode::Local) => checkpoints.review_state(&s.id.to_string()).ok(),
             (None, _) => None,
         };
         let facts = DeliveryFacts {

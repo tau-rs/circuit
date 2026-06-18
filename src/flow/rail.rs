@@ -62,6 +62,10 @@ fn review_label(r: Option<ReviewState>) -> &'static str {
 /// Render one session's rail. Pure; colorless (§8). `review = None` means the
 /// forge state is undeterminable (printed `PR ?`), distinct from a known `no PR`.
 /// `health` is always rendered from its glyph; this slice passes `Unknown`.
+// Rendering inputs (kind/view/branch/facts/review/health/archived) are each an
+// independent display axis; bundling them into a params struct would add
+// indirection without removing a real dependency. Allowed deliberately.
+#[allow(clippy::too_many_arguments)]
 pub fn render_rail(
     node_id: &str,
     kind: SessionKind,
@@ -92,7 +96,10 @@ pub fn render_rail(
     };
 
     let status_marker = if archived { " (archived)" } else { "" };
-    let line1 = format!("{node_id}  [{}]{status_marker}  {spine}{uncertain}", kind_label(kind));
+    let line1 = format!(
+        "{node_id}  [{}]{status_marker}  {spine}{uncertain}",
+        kind_label(kind)
+    );
 
     let line2 = match branch {
         Some(name) => format!(

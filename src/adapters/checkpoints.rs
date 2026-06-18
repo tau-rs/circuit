@@ -68,9 +68,7 @@ impl CheckpointStore for Checkpoints {
         let path = self.path_for(session);
         let contents = match std::fs::read_to_string(&path) {
             Ok(c) => c,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(ReviewState::None)
-            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(ReviewState::None),
             Err(e) => {
                 return Err(CheckpointError::Read {
                     path: path.display().to_string(),

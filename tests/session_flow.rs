@@ -114,7 +114,9 @@ fn local_checkpoint_drives_flow_to_review() {
 
     circuit(dir.path()).arg("init").assert().success();
     circuit(dir.path())
-        .args(["spec", "new", "checkout", "--title", "C", "--intent", "Pay."])
+        .args([
+            "spec", "new", "checkout", "--title", "C", "--intent", "Pay.",
+        ])
         .assert()
         .success();
     circuit(dir.path())
@@ -165,7 +167,11 @@ fn local_checkpoint_drives_flow_to_review() {
     // Drop a self-review checkpoint keyed on the ULID.
     let cp_dir = dir.path().join(".circuit").join("checkpoints");
     std::fs::create_dir_all(&cp_dir).unwrap();
-    std::fs::write(cp_dir.join(format!("{ulid}.toml")), "state = \"self-review\"\n").unwrap();
+    std::fs::write(
+        cp_dir.join(format!("{ulid}.toml")),
+        "state = \"self-review\"\n",
+    )
+    .unwrap();
 
     circuit(dir.path())
         .args(["flow", "auth-slice"])
@@ -195,13 +201,22 @@ fn spawn_one(branch: &str) -> (tempfile::TempDir, tempfile::TempDir) {
     init_git_repo(dir.path());
     circuit(dir.path()).arg("init").assert().success();
     circuit(dir.path())
-        .args(["spec", "new", "checkout", "--title", "C", "--intent", "Pay."])
+        .args([
+            "spec", "new", "checkout", "--title", "C", "--intent", "Pay.",
+        ])
         .assert()
         .success();
     circuit(dir.path())
         .args([
-            "dag", "add-node", "auth-slice", "--spec", "checkout", "--title", "Auth",
-            "--branch", branch,
+            "dag",
+            "add-node",
+            "auth-slice",
+            "--spec",
+            "checkout",
+            "--title",
+            "Auth",
+            "--branch",
+            branch,
         ])
         .assert()
         .success();
@@ -239,7 +254,9 @@ fn archive_frees_worktree_flips_status_keeps_branch_and_is_idempotent() {
         .output()
         .unwrap();
     assert!(
-        !String::from_utf8_lossy(&branch_listed.stdout).trim().is_empty(),
+        !String::from_utf8_lossy(&branch_listed.stdout)
+            .trim()
+            .is_empty(),
         "branch should be kept by default"
     );
 
@@ -271,10 +288,18 @@ fn archive_refuses_dirty_worktree_without_force_and_delete_branch_needs_force() 
     // --force discards the dirty worktree; --delete-branch + --force removes
     // the (un-merged once we commit? here still fresh) branch too.
     circuit(dir.path())
-        .args(["session", "archive", "auth-slice", "--delete-branch", "--force"])
+        .args([
+            "session",
+            "archive",
+            "auth-slice",
+            "--delete-branch",
+            "--force",
+        ])
         .assert()
         .success()
-        .stdout(predicate::str::contains("branch impl/checkout-auth deleted"));
+        .stdout(predicate::str::contains(
+            "branch impl/checkout-auth deleted",
+        ));
     assert!(!wt.exists());
     let branch_listed = Stdcmd::new("git")
         .arg("-C")
@@ -283,7 +308,9 @@ fn archive_refuses_dirty_worktree_without_force_and_delete_branch_needs_force() 
         .output()
         .unwrap();
     assert!(
-        String::from_utf8_lossy(&branch_listed.stdout).trim().is_empty(),
+        String::from_utf8_lossy(&branch_listed.stdout)
+            .trim()
+            .is_empty(),
         "branch should be deleted"
     );
 }
