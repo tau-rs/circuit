@@ -47,6 +47,20 @@ pub enum SessionKind {
     Fix,
 }
 
+/// Axis-2 lifecycle status (the M2 "session model" §3.3 — orthogonal to the
+/// derived flow stage). Serializes lowercase (`"active" | "archived"`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SessionStatus {
+    #[default]
+    Active,
+    Archived,
+}
+
+/// On-disk schema version for `SessionRecord`. Bumped to 2 when the `status`
+/// field was added; stored (not validated) in M2, so the bump is documentary.
+pub const SCHEMA_VERSION: u32 = 2;
+
 /// `.circuit/sessions/<id>.toml` — a session's authored intent. Only intent is
 /// stored: no stage, no worktree path, no branch *state* (all derived, §3.3).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -67,19 +81,24 @@ pub struct SessionRecord {
     /// For fix sessions: the non-green sub-indicator this session targets.
     #[serde(default)]
     pub fixes_indicator: Option<String>,
+    /// Axis-2 lifecycle status. `#[serde(default)]` => a pre-v2 record with no
+    /// `status` key loads as `Active`, so slice-0/A/B records parse unchanged.
+    #[serde(default)]
+    pub status: SessionStatus,
 }
 
 impl SessionRecord {
     /// A spec session: owns the DAG, writes no code, has no branch.
     pub fn spec(id: SessionId) -> Self {
         Self {
-            schema_version: 1,
+            schema_version: SCHEMA_VERSION,
             id,
             kind: SessionKind::Spec,
             parent: None,
             dag_node: None,
             branch: None,
             fixes_indicator: None,
+            status: SessionStatus::Active,
         }
     }
 
@@ -91,13 +110,14 @@ impl SessionRecord {
         branch: impl Into<String>,
     ) -> Self {
         Self {
-            schema_version: 1,
+            schema_version: SCHEMA_VERSION,
             id,
             kind: SessionKind::Impl,
             parent: Some(parent.into()),
             dag_node: Some(dag_node.into()),
             branch: Some(branch.into()),
             fixes_indicator: None,
+            status: SessionStatus::Active,
         }
     }
 
@@ -110,14 +130,33 @@ impl SessionRecord {
         fixes_indicator: impl Into<String>,
     ) -> Self {
         Self {
-            schema_version: 1,
+            schema_version: SCHEMA_VERSION,
             id,
             kind: SessionKind::Fix,
             parent: Some(parent.into()),
             dag_node: Some(dag_node.into()),
             branch: Some(branch.into()),
             fixes_indicator: Some(fixes_indicator.into()),
+            status: SessionStatus::Active,
         }
+    }
+
+    /// Is this session retired (Axis 2)?
+    pub fn is_archived(&self) -> bool {
+        self.status == SessionStatus::Archived
+    }
+
+    /// Retire the session. Normalizes `schema_version` — a record carrying a
+    /// `status` field is v2 by definition.
+    pub fn archive(&mut self) {
+        self.status = SessionStatus::Archived;
+        self.schema_version = SCHEMA_VERSION;
+    }
+
+    /// Return the session to active rotation. Normalizes `schema_version`.
+    pub fn unarchive(&mut self) {
+        self.status = SessionStatus::Active;
+        self.schema_version = SCHEMA_VERSION;
     }
 }
 
@@ -211,5 +250,56 @@ mod tests {
         assert_eq!(s.kind, SessionKind::Spec);
         assert!(s.parent.is_none());
         assert!(s.branch.is_none());
+    }
+
+    #[test]
+    fn new_session_is_active_at_schema_v2() {
+        let s = SessionRecord::spec(SessionId::generate());
+        assert_eq!(s.status, SessionStatus::Active);
+        assert!(!s.is_archived());
+        assert_eq!(s.schema_version, SCHEMA_VERSION);
+        assert_eq!(SCHEMA_VERSION, 2);
+    }
+
+    #[test]
+    fn archive_and_unarchive_flip_status_and_normalize_version() {
+        let mut s = SessionRecord::impl_(
+            SessionId::generate(),
+            "checkout",
+            "auth-slice",
+            "impl/checkout-auth",
+        );
+        s.archive();
+        assert!(s.is_archived());
+        assert_eq!(s.status, SessionStatus::Archived);
+        assert_eq!(s.schema_version, 2);
+        s.unarchive();
+        assert!(!s.is_archived());
+        assert_eq!(s.status, SessionStatus::Active);
+    }
+
+    #[test]
+    fn status_serializes_lowercase_and_round_trips() {
+        let mut s = SessionRecord::spec(SessionId::generate());
+        s.archive();
+        let text = toml::to_string_pretty(&s).unwrap();
+        assert!(
+            text.contains("status = \"archived\""),
+            "expected lowercase status, got: {text}"
+        );
+        let parsed: SessionRecord = toml::from_str(&text).unwrap();
+        assert_eq!(parsed, s);
+    }
+
+    #[test]
+    fn v1_record_without_status_parses_as_active() {
+        // A slice-0/A/B record predates the `status` field. It must load as
+        // Active (back-compat via #[serde(default)]).
+        let text = format!(
+            "schema_version = 1\nid = \"{SAMPLE_ULID}\"\nkind = \"spec\"\n"
+        );
+        let s: SessionRecord = toml::from_str(&text).unwrap();
+        assert_eq!(s.status, SessionStatus::Active);
+        assert!(!s.is_archived());
     }
 }
