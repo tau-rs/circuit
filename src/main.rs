@@ -12,7 +12,6 @@ use circuit::dag::DagError;
 use circuit::flow::facts::DeliveryFacts;
 use circuit::flow::rail::render_rail;
 use circuit::flow::stage::derive_stage;
-use circuit::model::local::resolve_worktree_dir;
 use circuit::model::node::DagNode;
 use circuit::adapters::store::Workspace;
 use circuit::ports::{CheckpointStore, ForgePort, GitPort};
@@ -288,50 +287,12 @@ fn run_session(command: SessionCommand) -> Result<()> {
 fn run_session_spawn(dag_node: &str, path: &Path) -> Result<()> {
     let ws = Workspace::new(path);
     require_initialized(&ws)?;
-
-    let node = ws
-        .load_dag_node(dag_node)
-        .with_context(|| format!("loading dag node {dag_node}"))?;
-    let config = ws.load_config().context("loading config.toml")?;
-    let base = &config.base_branch;
-
     let git = Git::new(ws.root());
-
-    // Refuse to clobber an existing branch (a session may already own it).
-    if git
-        .branch_facts(&node.branch, base)
-        .with_context(|| format!("checking branch {}", node.branch))?
-        .exists
-    {
-        anyhow::bail!(
-            "branch {} already exists — refusing to spawn over it",
-            node.branch
-        );
-    }
-
-    // 1. Allocate identity and write the authored record (parent = node.spec).
-    //    Record-first per §4/§7.1 (identity precedes the branch). If a later
-    //    git step fails, the branch-less record persists; delete the .toml (or
-    //    clean up the branch) and re-run — no automatic rollback in M2.
-    let id = SessionId::generate();
-    let record = SessionRecord::impl_(id, node.spec.clone(), node.id.clone(), node.branch.clone());
-    ws.save_session(&record)
-        .with_context(|| format!("writing session {id}"))?;
-
-    // 2. Resolve the (machine-local, never-stored) worktree path.
-    let local = ws.load_local().context("loading local.toml")?;
     let env = std::env::var("CIRCUIT_WORKTREES_DIR").ok();
-    let worktree = resolve_worktree_dir(env.as_deref(), &local, ws.root(), &id.to_string());
-
-    // 3. Create the branch + worktree.
-    git.create_branch(&node.branch, base)
-        .with_context(|| format!("creating branch {}", node.branch))?;
-    git.add_worktree(&node.branch, &worktree)
-        .with_context(|| format!("adding worktree at {}", worktree.display()))?;
-
-    println!("Spawned session {id} for node {} (stage: Project)", node.id);
-    println!("  branch:   {}", node.branch);
-    println!("  worktree: {}", worktree.display());
+    let out = circuit::app::session_spawn(&ws, &ws, &ws, &git, dag_node, env.as_deref(), ws.root())?;
+    println!("Spawned session {} for node {} (stage: Project)", out.session_id, out.dag_node);
+    println!("  branch:   {}", out.branch);
+    println!("  worktree: {}", out.worktree.display());
     Ok(())
 }
 
