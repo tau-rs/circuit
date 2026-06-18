@@ -23,6 +23,12 @@ pub trait GitPort {
     fn create_branch(&self, branch: &str, base: &str) -> Result<(), Self::Error>;
     fn add_worktree(&self, branch: &str, path: &Path) -> Result<(), Self::Error>;
     fn list_worktrees(&self) -> Result<Vec<Worktree>, Self::Error>;
+    /// Remove a worktree dir. `force` removes a dirty/locked worktree
+    /// (`git worktree remove --force`). The branch is never touched.
+    fn remove_worktree(&self, path: &Path, force: bool) -> Result<(), Self::Error>;
+    /// Delete a branch. `force` (`git branch -D`) deletes an un-merged branch;
+    /// without it (`-d`) git refuses an un-merged branch.
+    fn delete_branch(&self, branch: &str, force: bool) -> Result<(), Self::Error>;
 }
 
 /// Forge operations (GitHub via `gh` in M2). `review_state` returning `Err`
@@ -82,6 +88,12 @@ mod tests {
                 path: PathBuf::from("/tmp/wt"),
                 branch: Some("impl/x".to_string()),
             }])
+        }
+        fn remove_worktree(&self, _path: &Path, _force: bool) -> Result<(), Self::Error> {
+            Ok(())
+        }
+        fn delete_branch(&self, _branch: &str, _force: bool) -> Result<(), Self::Error> {
+            Ok(())
         }
     }
 

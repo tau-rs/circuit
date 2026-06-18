@@ -148,6 +148,23 @@ impl GitPort for Git {
         let out = self.run(&["worktree", "list", "--porcelain"])?;
         Ok(parse_worktree_porcelain(&out))
     }
+
+    fn remove_worktree(&self, path: &Path, force: bool) -> Result<(), GitError> {
+        let path_str = path.to_str().ok_or_else(|| GitError::Parse {
+            output: path.display().to_string(),
+            reason: "worktree path is not valid UTF-8".to_string(),
+        })?;
+        let mut args = vec!["worktree", "remove", path_str];
+        if force {
+            args.push("--force");
+        }
+        self.run(&args).map(|_| ())
+    }
+
+    fn delete_branch(&self, branch: &str, force: bool) -> Result<(), GitError> {
+        let flag = if force { "-D" } else { "-d" };
+        self.run(&["branch", flag, branch]).map(|_| ())
+    }
 }
 
 /// Parse `git worktree list --porcelain` into `Worktree` entries. Blocks are
@@ -376,5 +393,67 @@ detached
         assert_eq!(ws[1].branch.as_deref(), Some("impl/x"));
         assert_eq!(ws[1].path, PathBuf::from("/repo/wt"));
         assert_eq!(ws[2].branch, None);
+    }
+
+    #[test]
+    fn remove_worktree_removes_a_clean_worktree_keeping_branch() {
+        let (d, git) = init_repo();
+        git.create_branch("impl/x", "main").unwrap();
+        let wt = d.path().join("wt-x");
+        git.add_worktree("impl/x", &wt).unwrap();
+        assert!(wt.exists());
+
+        git.remove_worktree(&wt, false).unwrap();
+        assert!(!wt.exists(), "worktree dir should be gone");
+        // Branch survives worktree removal.
+        assert!(git.branch_facts("impl/x", "main").unwrap().exists);
+    }
+
+    #[test]
+    fn remove_worktree_refuses_dirty_without_force_then_succeeds_with_force() {
+        let (d, git) = init_repo();
+        git.create_branch("impl/x", "main").unwrap();
+        let wt = d.path().join("wt-x");
+        git.add_worktree("impl/x", &wt).unwrap();
+        // An untracked file makes the worktree dirty (git refuses removal).
+        std::fs::write(wt.join("scratch.txt"), "wip\n").unwrap();
+
+        assert!(
+            git.remove_worktree(&wt, false).is_err(),
+            "dirty worktree must be refused without force"
+        );
+        assert!(wt.exists());
+        git.remove_worktree(&wt, true).unwrap();
+        assert!(!wt.exists());
+    }
+
+    #[test]
+    fn delete_branch_removes_merged_with_d_and_unmerged_only_with_force() {
+        let (d, git) = init_repo();
+        let p = d.path();
+
+        // Merged branch (fresh, == main): -d (force=false) succeeds.
+        git.create_branch("merged", "main").unwrap();
+        git.delete_branch("merged", false).unwrap();
+        assert!(!git.branch_facts("merged", "main").unwrap().exists);
+
+        // Un-merged branch (a commit ahead): -d refuses, -D succeeds.
+        git.create_branch("feat", "main").unwrap();
+        let wt = p.join("wt");
+        git_raw(p, &["worktree", "add", "-q", "wt", "feat"]);
+        std::fs::write(p.join("wt/new.txt"), "x\n").unwrap();
+        git_raw(&p.join("wt"), &["add", "new.txt"]);
+        git_raw(&p.join("wt"), &["commit", "-qm", "work"]);
+
+        // Must remove the worktree before deleting the branch that it's using.
+        git.remove_worktree(&wt, false).unwrap();
+
+        assert!(
+            git.delete_branch("feat", false).is_err(),
+            "un-merged branch must be refused without force"
+        );
+        assert!(git.branch_facts("feat", "main").unwrap().exists);
+        git.delete_branch("feat", true).unwrap();
+        assert!(!git.branch_facts("feat", "main").unwrap().exists);
     }
 }
