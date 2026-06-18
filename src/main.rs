@@ -12,8 +12,6 @@ use circuit::dag::{validate, DagError};
 use circuit::flow::facts::DeliveryFacts;
 use circuit::flow::rail::render_rail;
 use circuit::flow::stage::derive_stage;
-use circuit::model::config::Config;
-use circuit::model::glossary::Glossary;
 use circuit::model::local::resolve_worktree_dir;
 use circuit::model::node::DagNode;
 use circuit::model::spec::SpecRecord;
@@ -193,16 +191,15 @@ fn run_analyze(path: &Path) -> Result<()> {
 
 fn run_init(path: &Path) -> Result<()> {
     let ws = Workspace::new(path);
-    if ws.is_initialized() {
-        println!("Already initialized at {}", ws.circuit_dir().display());
-        return Ok(());
+    match circuit::app::init(&ws)? {
+        circuit::app::InitOutcome::AlreadyInitialized => {
+            println!("Already initialized at {}", ws.circuit_dir().display());
+        }
+        circuit::app::InitOutcome::Initialized => {
+            ensure_gitignored(path, ".circuit/local.toml").context("updating .gitignore")?;
+            println!("Initialized .circuit/ at {}", ws.circuit_dir().display());
+        }
     }
-    ws.save_config(&Config::default())
-        .context("writing config.toml")?;
-    ws.save_glossary(&Glossary::default())
-        .context("writing glossary.toml")?;
-    ensure_gitignored(path, ".circuit/local.toml").context("updating .gitignore")?;
-    println!("Initialized .circuit/ at {}", ws.circuit_dir().display());
     Ok(())
 }
 

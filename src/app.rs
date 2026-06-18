@@ -2,6 +2,47 @@
 //! ports it needs and returns domain/view values; `main.rs` does all printing.
 //! No clap, no filesystem, no shell-outs here.
 
+use anyhow::Context;
+
+use crate::model::config::Config;
+use crate::model::glossary::Glossary;
+use crate::ports::SettingsRepo;
+
+/// Outcome of `init`, so `main.rs` can print the right line.
+pub enum InitOutcome {
+    AlreadyInitialized,
+    Initialized,
+}
+
+/// Initialize `.circuit/` settings. Returns whether it was already present.
+/// The `.gitignore` side-effect and printing stay in the CLI edge.
+pub fn init<S: SettingsRepo>(settings: &S) -> anyhow::Result<InitOutcome> {
+    if settings.is_initialized() {
+        return Ok(InitOutcome::AlreadyInitialized);
+    }
+    settings.save_config(&Config::default()).context("writing config.toml")?;
+    settings.save_glossary(&Glossary::default()).context("writing glossary.toml")?;
+    Ok(InitOutcome::Initialized)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::fakes::MemStore;
+
+    #[test]
+    fn init_on_fresh_store_reports_initialized() {
+        let store = MemStore::default();
+        assert!(matches!(init(&store).unwrap(), InitOutcome::Initialized));
+    }
+
+    #[test]
+    fn init_on_initialized_store_is_noop() {
+        let store = MemStore { initialized: true, ..Default::default() };
+        assert!(matches!(init(&store).unwrap(), InitOutcome::AlreadyInitialized));
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod fakes {
     use std::cell::RefCell;
