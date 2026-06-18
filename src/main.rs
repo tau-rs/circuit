@@ -114,6 +114,14 @@ enum SessionCommand {
         #[arg(long, default_value = ".")]
         path: PathBuf,
     },
+    /// Unarchive (restore) a session: flip status back to `active` and re-add
+    /// the worktree from the kept branch.
+    Unarchive {
+        /// Session id (ULID) or unique DAG-node name
+        id: String,
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -321,6 +329,7 @@ fn run_session(command: SessionCommand) -> Result<()> {
             force,
             path,
         } => run_session_archive(&id, delete_branch, force, &path),
+        SessionCommand::Unarchive { id, path } => run_session_unarchive(&id, &path),
     }
 }
 
@@ -428,6 +437,50 @@ fn run_session_archive(id: &str, delete_branch: bool, force: bool, path: &Path) 
         (Some(b), true) => println!("  branch {b} deleted"),
         (Some(b), false) => println!("  branch {b} kept (use --delete-branch to remove)"),
         (None, _) => {}
+    }
+    Ok(())
+}
+
+/// Restore an archived session: flip status to active, then re-add the worktree
+/// from the kept branch (resolving its path exactly as `spawn` does). If the
+/// branch was deleted (archive --delete-branch), warn instead of recreating.
+fn run_session_unarchive(id: &str, path: &Path) -> Result<()> {
+    let ws = Workspace::new(path);
+    require_initialized(&ws)?;
+
+    let mut record = resolve_session(&ws, id)?;
+    if !record.is_archived() {
+        println!("Session {} is not archived.", record.id);
+        return Ok(());
+    }
+
+    record.unarchive();
+    ws.save_session(&record)
+        .with_context(|| format!("saving restored session {}", record.id))?;
+    println!("Session {} restored to active.", record.id);
+
+    // Rehydrate the worktree from the kept branch.
+    if let Some(branch) = &record.branch {
+        let git = Git::new(ws.root());
+        let base = ws.load_config().context("loading config.toml")?.base_branch;
+        let exists = git
+            .branch_facts(branch, &base)
+            .with_context(|| format!("checking branch {branch}"))?
+            .exists;
+        if exists {
+            let local = ws.load_local().context("loading local.toml")?;
+            let env = std::env::var("CIRCUIT_WORKTREES_DIR").ok();
+            let worktree =
+                resolve_worktree_dir(env.as_deref(), &local, ws.root(), &record.id.to_string());
+            git.add_worktree(branch, &worktree)
+                .with_context(|| format!("re-adding worktree at {}", worktree.display()))?;
+            println!("  worktree: {}", worktree.display());
+        } else {
+            println!(
+                "  branch {branch} no longer exists — worktree not recreated; \
+                 session derives Draft"
+            );
+        }
     }
     Ok(())
 }

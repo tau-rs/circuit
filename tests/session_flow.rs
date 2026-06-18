@@ -289,6 +289,31 @@ fn archive_refuses_dirty_worktree_without_force_and_delete_branch_needs_force() 
 }
 
 #[test]
+fn unarchive_flips_status_and_rehydrates_worktree() {
+    let (dir, wt_root) = spawn_one("impl/checkout-auth");
+    let (ulid, _) = read_only_session(dir.path());
+    let wt = wt_root.path().join(&ulid);
+
+    circuit(dir.path())
+        .args(["session", "archive", "auth-slice"])
+        .assert()
+        .success();
+    assert!(!wt.exists());
+
+    // Unarchive (same worktree-root env so the path resolves identically).
+    circuit(dir.path())
+        .env("CIRCUIT_WORKTREES_DIR", wt_root.path())
+        .args(["session", "unarchive", "auth-slice"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("restored"));
+
+    assert!(wt.exists(), "unarchive re-added the worktree");
+    let (_, text) = read_only_session(dir.path());
+    assert!(text.contains("status = \"active\""), "got: {text}");
+}
+
+#[test]
 fn spawn_refuses_to_clobber_an_existing_branch() {
     let dir = tempfile::tempdir().unwrap();
     let wt_root = tempfile::tempdir().unwrap();
