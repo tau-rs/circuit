@@ -285,8 +285,11 @@ fn archive_refuses_dirty_worktree_without_force_and_delete_branch_needs_force() 
     let (_, text) = read_only_session(dir.path());
     assert!(!text.contains("status = \"archived\""), "got: {text}");
 
-    // --force discards the dirty worktree; --delete-branch + --force removes
-    // the (un-merged once we commit? here still fresh) branch too.
+    // --force discards the dirty worktree; --delete-branch removes the branch.
+    // (The un-merged-branch refusal is covered by the git.rs adapter unit test
+    // delete_branch_removes_merged_with_d_and_unmerged_only_with_force; this
+    // fresh branch is fast-forward-deletable, so --force here only exercises
+    // the dirty-worktree path.)
     circuit(dir.path())
         .args([
             "session",

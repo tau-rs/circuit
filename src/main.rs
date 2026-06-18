@@ -460,6 +460,10 @@ fn run_session_unarchive(id: &str, path: &Path) -> Result<()> {
         return Ok(());
     }
 
+    // Status flip is saved before the worktree rehydrate: a later add_worktree
+    // failure then leaves the session truthfully `active` but worktree-less,
+    // which derives an honest stage from branch_facts and is re-runnable by
+    // hand (the idempotent guard above only short-circuits a second unarchive).
     record.unarchive();
     ws.save_session(&record)
         .with_context(|| format!("saving restored session {}", record.id))?;
