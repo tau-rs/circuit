@@ -6,6 +6,12 @@
 use std::path::{Path, PathBuf};
 
 use crate::flow::facts::{BranchFacts, ReviewState};
+use crate::model::config::Config;
+use crate::model::glossary::Glossary;
+use crate::model::local::LocalConfig;
+use crate::model::node::DagNode;
+use crate::model::spec::SpecRecord;
+use crate::session::SessionRecord;
 
 /// One entry from `git worktree list`. The path is derived at runtime and never
 /// stored; `branch` is `None` for a detached-HEAD worktree.
@@ -54,6 +60,51 @@ pub trait CheckpointStore {
     type Error: std::error::Error + Send + Sync + 'static;
 
     fn review_state(&self, session: &str) -> Result<ReviewState, Self::Error>;
+}
+
+/// Persistence for project-level settings: `config.toml`, `glossary.toml`,
+/// and the machine-local `local.toml`. `is_initialized` is a fast existence
+/// check used by every command to gate "not yet init" errors.
+pub trait SettingsRepo {
+    type Error: std::error::Error + Send + Sync + 'static;
+    fn is_initialized(&self) -> bool;
+    fn load_config(&self) -> Result<Config, Self::Error>;
+    fn save_config(&self, c: &Config) -> Result<(), Self::Error>;
+    fn load_glossary(&self) -> Result<Glossary, Self::Error>;
+    fn save_glossary(&self, g: &Glossary) -> Result<(), Self::Error>;
+    fn load_local(&self) -> Result<LocalConfig, Self::Error>;
+}
+
+/// Persistence for spec sessions' authored intent (`specs/<id>.toml`).
+pub trait SpecRepo {
+    type Error: std::error::Error + Send + Sync + 'static;
+    fn load_spec(&self, id: &str) -> Result<SpecRecord, Self::Error>;
+    fn save_spec(&self, s: &SpecRecord) -> Result<(), Self::Error>;
+}
+
+/// Persistence for DAG nodes (`dag/<id>.toml`). `list_dag_nodes` is used by
+/// board rendering and cycle checks.
+pub trait DagRepo {
+    type Error: std::error::Error + Send + Sync + 'static;
+    fn load_dag_node(&self, id: &str) -> Result<DagNode, Self::Error>;
+    fn save_dag_node(&self, n: &DagNode) -> Result<(), Self::Error>;
+    fn list_dag_nodes(&self) -> Result<Vec<DagNode>, Self::Error>;
+}
+
+/// Persistence for session records (`sessions/<id>.toml`). `list_sessions` is
+/// used by board rendering and the `resolve_session` helper.
+pub trait SessionRepo {
+    type Error: std::error::Error + Send + Sync + 'static;
+    fn load_session(&self, id: &str) -> Result<SessionRecord, Self::Error>;
+    fn save_session(&self, s: &SessionRecord) -> Result<(), Self::Error>;
+    fn list_sessions(&self) -> Result<Vec<SessionRecord>, Self::Error>;
+}
+
+/// Read-only probes for delivery-mode detection. Separated from `ForgePort` so
+/// tests can inject a simple bool pair without a full forge stub.
+pub trait DeliveryProbe {
+    fn gh_available(&self) -> bool;
+    fn has_github_remote(&self) -> bool;
 }
 
 #[cfg(test)]

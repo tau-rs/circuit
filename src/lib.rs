@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub mod adapters;
+pub mod app;
 pub mod builder;
 pub mod cockpit;
 pub mod dag;

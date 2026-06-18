@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use super::{
+use crate::model::{
     config::Config, glossary::Glossary, load_toml, local::LocalConfig, node::DagNode, save_toml,
     spec::SpecRecord, ModelError,
 };
@@ -161,6 +161,63 @@ impl Workspace {
             }
         }
         Ok(sessions)
+    }
+}
+
+use crate::ports::{DagRepo, SessionRepo, SettingsRepo, SpecRepo};
+
+impl SettingsRepo for Workspace {
+    type Error = ModelError;
+    fn is_initialized(&self) -> bool {
+        Workspace::is_initialized(self)
+    }
+    fn load_config(&self) -> Result<Config, ModelError> {
+        Workspace::load_config(self)
+    }
+    fn save_config(&self, c: &Config) -> Result<(), ModelError> {
+        Workspace::save_config(self, c)
+    }
+    fn load_glossary(&self) -> Result<Glossary, ModelError> {
+        Workspace::load_glossary(self)
+    }
+    fn save_glossary(&self, g: &Glossary) -> Result<(), ModelError> {
+        Workspace::save_glossary(self, g)
+    }
+    fn load_local(&self) -> Result<LocalConfig, ModelError> {
+        Workspace::load_local(self)
+    }
+}
+impl SpecRepo for Workspace {
+    type Error = ModelError;
+    fn load_spec(&self, id: &str) -> Result<SpecRecord, ModelError> {
+        Workspace::load_spec(self, id)
+    }
+    fn save_spec(&self, s: &SpecRecord) -> Result<(), ModelError> {
+        Workspace::save_spec(self, s)
+    }
+}
+impl DagRepo for Workspace {
+    type Error = ModelError;
+    fn load_dag_node(&self, id: &str) -> Result<DagNode, ModelError> {
+        Workspace::load_dag_node(self, id)
+    }
+    fn save_dag_node(&self, n: &DagNode) -> Result<(), ModelError> {
+        Workspace::save_dag_node(self, n)
+    }
+    fn list_dag_nodes(&self) -> Result<Vec<DagNode>, ModelError> {
+        Workspace::list_dag_nodes(self)
+    }
+}
+impl SessionRepo for Workspace {
+    type Error = ModelError;
+    fn load_session(&self, id: &str) -> Result<SessionRecord, ModelError> {
+        Workspace::load_session(self, id)
+    }
+    fn save_session(&self, s: &SessionRecord) -> Result<(), ModelError> {
+        Workspace::save_session(self, s)
+    }
+    fn list_sessions(&self) -> Result<Vec<SessionRecord>, ModelError> {
+        Workspace::list_sessions(self)
     }
 }
 

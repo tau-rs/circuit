@@ -1,26 +1,16 @@
+#![forbid(unsafe_code)]
+
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
 use circuit::adapters::checkpoints::Checkpoints;
-use circuit::adapters::delivery::{self, DeliveryMode};
 use circuit::adapters::forge::Forge;
 use circuit::adapters::git::Git;
-use circuit::cockpit::health::Health;
-use circuit::dag::{validate, DagError};
-use circuit::flow::facts::DeliveryFacts;
-use circuit::flow::rail::render_rail;
-use circuit::flow::stage::derive_stage;
-use circuit::model::config::Config;
-use circuit::model::glossary::Glossary;
-use circuit::model::local::resolve_worktree_dir;
-use circuit::model::node::DagNode;
-use circuit::model::spec::SpecRecord;
-use circuit::model::store::Workspace;
-use circuit::ports::{CheckpointStore, ForgePort, GitPort};
-use circuit::render::dag_board::{self, Board, BoardNode};
-use circuit::session::{SessionId, SessionRecord};
+use circuit::adapters::probe::SystemDeliveryProbe;
+use circuit::adapters::store::Workspace;
+use circuit::dag::DagError;
 
 #[derive(Parser)]
 #[command(name = "circuit", about = "Architecture derivation, sessions & flow")]
@@ -177,57 +167,21 @@ fn main() -> Result<()> {
 }
 
 fn run_analyze(path: &Path) -> Result<()> {
-    let graph = circuit::builder::build_graph(path)?;
-    let cycles = circuit::indicators::cycles::find_cycles(&graph);
-    let violations = circuit::indicators::dependency_rule::violations(&graph);
-
-    println!(
-        "Architecture — No-cycles (ADP): {}",
-        if cycles.is_empty() {
-            "● SOUND".to_string()
-        } else {
-            format!("⛔ {} cyclic group(s)", cycles.len())
-        }
-    );
-    for c in &cycles {
-        println!("  cycle: {}", c.join(" → "));
-    }
-
-    println!(
-        "Architecture — Dependency rule: {}",
-        if violations.is_empty() {
-            "● SOUND".to_string()
-        } else {
-            format!("⛔ {} violation(s)", violations.len())
-        }
-    );
-    for v in &violations {
-        println!(
-            "  {} ({:?}) → {} ({:?})  VIOLATION",
-            v.from, v.from_layer, v.to, v.to_layer
-        );
-    }
-
-    println!("\n--- mermaid ---");
-    println!(
-        "{}",
-        circuit::render::mermaid::render(&graph, &violations, &cycles)
-    );
+    println!("{}", circuit::app::analyze(path)?);
     Ok(())
 }
 
 fn run_init(path: &Path) -> Result<()> {
     let ws = Workspace::new(path);
-    if ws.is_initialized() {
-        println!("Already initialized at {}", ws.circuit_dir().display());
-        return Ok(());
+    match circuit::app::init(&ws)? {
+        circuit::app::InitOutcome::AlreadyInitialized => {
+            println!("Already initialized at {}", ws.circuit_dir().display());
+        }
+        circuit::app::InitOutcome::Initialized => {
+            ensure_gitignored(path, ".circuit/local.toml").context("updating .gitignore")?;
+            println!("Initialized .circuit/ at {}", ws.circuit_dir().display());
+        }
     }
-    ws.save_config(&Config::default())
-        .context("writing config.toml")?;
-    ws.save_glossary(&Glossary::default())
-        .context("writing glossary.toml")?;
-    ensure_gitignored(path, ".circuit/local.toml").context("updating .gitignore")?;
-    println!("Initialized .circuit/ at {}", ws.circuit_dir().display());
     Ok(())
 }
 
@@ -254,10 +208,7 @@ fn run_spec(command: SpecCommand) -> Result<()> {
         } => {
             let ws = Workspace::new(&path);
             require_initialized(&ws)?;
-            let mut spec = SpecRecord::new(&id, title, intent);
-            spec.bounded_contexts = contexts;
-            ws.save_spec(&spec)
-                .with_context(|| format!("writing spec {id}"))?;
+            circuit::app::spec_new(&ws, &ws, &id, title, intent, contexts)?;
             println!("Created spec session: {id}");
             Ok(())
         }
@@ -277,34 +228,22 @@ fn run_dag(command: DagCommand) -> Result<()> {
         } => {
             let ws = Workspace::new(&path);
             require_initialized(&ws)?;
-            let mut node = DagNode::new(&id, spec, title, branch);
-            node.intent = intent;
-            node.depends_on = depends_on;
-            ws.save_dag_node(&node)
-                .with_context(|| format!("writing dag node {id}"))?;
+            circuit::app::dag_add_node(&ws, &ws, &id, spec, title, branch, intent, depends_on)?;
             println!("Added DAG node: {id}");
             Ok(())
         }
         DagCommand::Link { from, to, path } => {
             let ws = Workspace::new(&path);
             require_initialized(&ws)?;
-            let mut node = ws
-                .load_dag_node(&from)
-                .with_context(|| format!("loading dag node {from}"))?;
-            if !node.depends_on.contains(&to) {
-                node.depends_on.push(to.clone());
-            }
-            ws.save_dag_node(&node)
-                .with_context(|| format!("writing dag node {from}"))?;
+            circuit::app::dag_link(&ws, &ws, &from, &to)?;
             println!("Linked {from} → {to}");
             Ok(())
         }
         DagCommand::Check { path } => {
             let ws = Workspace::new(&path);
-            let nodes = ws.list_dag_nodes().context("reading dag nodes")?;
-            let errors = validate(&nodes);
+            let (errors, count) = circuit::app::dag_check(&ws)?;
             if errors.is_empty() {
-                println!("DAG sound — {} node(s), no problems", nodes.len());
+                println!("DAG sound — {count} node(s), no problems");
                 return Ok(());
             }
             for e in &errors {
@@ -339,107 +278,47 @@ fn run_session(command: SessionCommand) -> Result<()> {
 fn run_session_spawn(dag_node: &str, path: &Path) -> Result<()> {
     let ws = Workspace::new(path);
     require_initialized(&ws)?;
-
-    let node = ws
-        .load_dag_node(dag_node)
-        .with_context(|| format!("loading dag node {dag_node}"))?;
-    let config = ws.load_config().context("loading config.toml")?;
-    let base = &config.base_branch;
-
     let git = Git::new(ws.root());
-
-    // Refuse to clobber an existing branch (a session may already own it).
-    if git
-        .branch_facts(&node.branch, base)
-        .with_context(|| format!("checking branch {}", node.branch))?
-        .exists
-    {
-        anyhow::bail!(
-            "branch {} already exists — refusing to spawn over it",
-            node.branch
-        );
-    }
-
-    // 1. Allocate identity and write the authored record (parent = node.spec).
-    //    Record-first per §4/§7.1 (identity precedes the branch). If a later
-    //    git step fails, the branch-less record persists; delete the .toml (or
-    //    clean up the branch) and re-run — no automatic rollback in M2.
-    let id = SessionId::generate();
-    let record = SessionRecord::impl_(id, node.spec.clone(), node.id.clone(), node.branch.clone());
-    ws.save_session(&record)
-        .with_context(|| format!("writing session {id}"))?;
-
-    // 2. Resolve the (machine-local, never-stored) worktree path.
-    let local = ws.load_local().context("loading local.toml")?;
     let env = std::env::var("CIRCUIT_WORKTREES_DIR").ok();
-    let worktree = resolve_worktree_dir(env.as_deref(), &local, ws.root(), &id.to_string());
-
-    // 3. Create the branch + worktree.
-    git.create_branch(&node.branch, base)
-        .with_context(|| format!("creating branch {}", node.branch))?;
-    git.add_worktree(&node.branch, &worktree)
-        .with_context(|| format!("adding worktree at {}", worktree.display()))?;
-
-    println!("Spawned session {id} for node {} (stage: Project)", node.id);
-    println!("  branch:   {}", node.branch);
-    println!("  worktree: {}", worktree.display());
+    let out =
+        circuit::app::session_spawn(&ws, &ws, &ws, &git, dag_node, env.as_deref(), ws.root())?;
+    println!(
+        "Spawned session {} for node {} (stage: Project)",
+        out.session_id, out.dag_node
+    );
+    println!("  branch:   {}", out.branch);
+    println!("  worktree: {}", out.worktree.display());
     Ok(())
 }
 
-/// Archive a session: locate + remove its worktree (path is never stored, so
-/// we find it by branch in `git worktree list`), optionally delete the branch,
-/// then flip status. Teardown precedes the status flip so a failed teardown
-/// leaves the session truthfully `active`. Idempotent.
+fn run_flow(selector: Option<&str>, all: bool, path: &Path) -> Result<()> {
+    let ws = Workspace::new(path);
+    require_initialized(&ws)?;
+    let git = Git::new(ws.root());
+    let forge = Forge::new(ws.root());
+    let checkpoints = Checkpoints::new(ws.root());
+    let probe = SystemDeliveryProbe::new(ws.root());
+    let out = circuit::app::flow(&ws, &ws, &git, &forge, &checkpoints, &probe, selector, all)?;
+    println!("{out}");
+    Ok(())
+}
+
+/// Archive a session: delegates the worktree/branch teardown + status flip to
+/// the app layer, then prints the outcome.
 fn run_session_archive(id: &str, delete_branch: bool, force: bool, path: &Path) -> Result<()> {
     let ws = Workspace::new(path);
     require_initialized(&ws)?;
-
-    let mut record = resolve_session(&ws, id)?;
-    if record.is_archived() {
-        println!("Session {} already archived.", record.id);
+    let git = Git::new(ws.root());
+    let out = circuit::app::session_archive(&ws, &ws, &git, id, delete_branch, force)?;
+    if out.already_archived {
+        println!("Session {} already archived.", out.session_id);
         return Ok(());
     }
-
-    let git = Git::new(ws.root());
-
-    // 1. Tear down the worktree, located by branch (never stored). A dirty
-    //    worktree is refused without --force — the finalizer analog: a live
-    //    agent dirties its worktree, so plain archive refuses while it works.
-    if let Some(branch) = &record.branch {
-        let worktrees = git.list_worktrees().context("listing worktrees")?;
-        if let Some(wt) = worktrees
-            .into_iter()
-            .find(|w| w.branch.as_deref() == Some(branch.as_str()))
-        {
-            git.remove_worktree(&wt.path, force).with_context(|| {
-                format!(
-                    "removing worktree at {} (pass --force to discard uncommitted \
-                     changes or unlock — stop the agent first if it is still running)",
-                    wt.path.display()
-                )
-            })?;
-        }
-    }
-
-    // 2. Optionally delete the branch (un-merged requires --force).
-    if delete_branch {
-        if let Some(branch) = &record.branch {
-            git.delete_branch(branch, force).with_context(|| {
-                format!("deleting branch {branch} (pass --force to delete an un-merged branch)")
-            })?;
-        }
-    }
-
-    // 3. Flip the durable status signal.
-    record.archive();
-    ws.save_session(&record)
-        .with_context(|| format!("saving archived session {}", record.id))?;
-
     println!(
         "Session {} archived — agent session may now end.",
-        record.id
+        out.session_id
     );
-    match (&record.branch, delete_branch) {
+    match (&out.branch, delete_branch) {
         (Some(b), true) => println!("  branch {b} deleted"),
         (Some(b), false) => println!("  branch {b} kept (use --delete-branch to remove)"),
         (None, _) => {}
@@ -447,241 +326,36 @@ fn run_session_archive(id: &str, delete_branch: bool, force: bool, path: &Path) 
     Ok(())
 }
 
-/// Restore an archived session: flip status to active, then re-add the worktree
-/// from the kept branch (resolving its path exactly as `spawn` does). If the
-/// branch was deleted (archive --delete-branch), warn instead of recreating.
+/// Unarchive a session: flips status back to active and rehydrates the worktree
+/// from the kept branch (delegated to the app layer).
 fn run_session_unarchive(id: &str, path: &Path) -> Result<()> {
     let ws = Workspace::new(path);
     require_initialized(&ws)?;
-
-    let mut record = resolve_session(&ws, id)?;
-    if !record.is_archived() {
-        println!("Session {} is not archived.", record.id);
-        return Ok(());
-    }
-
-    // Status flip is saved before the worktree rehydrate: a later add_worktree
-    // failure then leaves the session truthfully `active` but worktree-less,
-    // which derives an honest stage from branch_facts and is re-runnable by
-    // hand (the idempotent guard above only short-circuits a second unarchive).
-    record.unarchive();
-    ws.save_session(&record)
-        .with_context(|| format!("saving restored session {}", record.id))?;
-    println!("Session {} restored to active.", record.id);
-
-    // Rehydrate the worktree from the kept branch.
-    if let Some(branch) = &record.branch {
-        let git = Git::new(ws.root());
-        let base = ws.load_config().context("loading config.toml")?.base_branch;
-        let exists = git
-            .branch_facts(branch, &base)
-            .with_context(|| format!("checking branch {branch}"))?
-            .exists;
-        if exists {
-            let local = ws.load_local().context("loading local.toml")?;
-            let env = std::env::var("CIRCUIT_WORKTREES_DIR").ok();
-            let worktree =
-                resolve_worktree_dir(env.as_deref(), &local, ws.root(), &record.id.to_string());
-            git.add_worktree(branch, &worktree)
-                .with_context(|| format!("re-adding worktree at {}", worktree.display()))?;
-            println!("  worktree: {}", worktree.display());
-        } else {
-            println!(
-                "  branch {branch} no longer exists — worktree not recreated; \
-                 session derives Draft"
-            );
-        }
-    }
-    Ok(())
-}
-
-/// Is the `gh` CLI installed and runnable? (Auth is checked per-call via the
-/// review_state error path; this only gates which source we consult.)
-fn gh_available() -> bool {
-    std::process::Command::new("gh")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
-
-/// Does the repo at `root` have a remote pointing at github.com?
-fn has_github_remote(root: &Path) -> bool {
-    std::process::Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["remote", "-v"])
-        .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).contains("github.com"))
-        .unwrap_or(false)
-}
-
-/// Render the rail for one session (by ULID, else by unique DAG-node name) or,
-/// when `selector` is `None`, every session in the workspace.
-fn run_flow(selector: Option<&str>, all: bool, path: &Path) -> Result<()> {
-    let ws = Workspace::new(path);
-    require_initialized(&ws)?;
-
-    let sessions = match selector {
-        // An explicit selector always shows the named session, even archived.
-        Some(sel) => vec![resolve_session(&ws, sel)?],
-        None => {
-            let mut listed = ws.list_sessions().context("listing sessions")?;
-            // Hide archived sessions by default; --all includes them.
-            if !all {
-                listed.retain(|s| !s.is_archived());
-            }
-            listed
-        }
-    };
-
-    if sessions.is_empty() {
-        println!("No sessions yet.");
-        return Ok(());
-    }
-
-    let config = ws.load_config().context("loading config.toml")?;
     let git = Git::new(ws.root());
-    let mode = delivery::resolve(gh_available(), has_github_remote(ws.root()));
-    let forge = Forge::new(ws.root());
-    let checkpoints = Checkpoints::new(ws.root());
-
-    let mut blocks = Vec::new();
-    for s in &sessions {
-        let branch_facts = match &s.branch {
-            Some(b) => git
-                .branch_facts(b, &config.base_branch)
-                .with_context(|| format!("deriving facts for {b}"))?,
-            None => Default::default(),
-        };
-        // Resolve real review state from the selected source. Any adapter Err
-        // (forge unreachable, unreadable checkpoint) degrades to `None` —
-        // the honest "undeterminable" path that renders `PR ?` (§7.2).
-        let review = match (&s.branch, mode) {
-            (Some(b), DeliveryMode::Forge) => forge.review_state(b).ok(),
-            (Some(_), DeliveryMode::Local) => checkpoints.review_state(&s.id.to_string()).ok(),
-            (None, _) => None,
-        };
-        let facts = DeliveryFacts {
-            branch: branch_facts,
-            review,
-        };
-        let view = derive_stage(s, &facts);
-        // Label by DAG node when present (impl/fix), else by session id (spec).
-        let label = s.dag_node.clone().unwrap_or_else(|| s.id.to_string());
-        blocks.push(render_rail(
-            &label,
-            s.kind,
-            view,
-            s.branch.as_deref(),
-            &facts.branch,
-            facts.review,
-            Health::Unknown,
-            s.is_archived(),
-        ));
+    let env = std::env::var("CIRCUIT_WORKTREES_DIR").ok();
+    let out = circuit::app::session_unarchive(&ws, &ws, &git, id, env.as_deref(), ws.root())?;
+    if out.was_not_archived {
+        println!("Session {} is not archived.", out.session_id);
+        return Ok(());
     }
-    println!("{}", blocks.join("\n\n"));
+    println!("Session {} restored to active.", out.session_id);
+    match (&out.rehydrated_worktree, &out.branch_missing) {
+        (Some(wt), _) => println!("  worktree: {}", wt.display()),
+        (None, Some(branch)) => println!(
+            "  branch {branch} no longer exists — worktree not recreated; \
+             session derives Draft"
+        ),
+        (None, None) => {}
+    }
     Ok(())
-}
-
-/// Resolve a session selector: first as a ULID, then as a unique DAG-node name.
-fn resolve_session(ws: &Workspace, selector: &str) -> Result<SessionRecord> {
-    // Exact ULID match.
-    if selector.parse::<SessionId>().is_ok() {
-        if let Ok(s) = ws.load_session(selector) {
-            return Ok(s);
-        }
-    }
-    // Fall back to a unique DAG-node-name match.
-    let all = ws.list_sessions().context("listing sessions")?;
-    let mut matches: Vec<SessionRecord> = all
-        .into_iter()
-        .filter(|s| s.dag_node.as_deref() == Some(selector))
-        .collect();
-    match matches.len() {
-        1 => Ok(matches.pop().unwrap()),
-        0 => anyhow::bail!(
-            "no session matches `{selector}` (not a known session id or DAG-node name)"
-        ),
-        n => anyhow::bail!(
-            "`{selector}` matches {n} sessions — pass the session id (ULID) to disambiguate"
-        ),
-    }
 }
 
 fn run_board(spec: &str, path: &Path) -> Result<()> {
     let ws = Workspace::new(path);
     require_initialized(&ws)?;
-    let base = ws.load_config().context("reading config.toml")?.base_branch;
-    let nodes: Vec<DagNode> = ws
-        .list_dag_nodes()
-        .context("reading dag nodes")?
-        .into_iter()
-        .filter(|n| n.spec == spec)
-        .collect();
-    let sessions = ws.list_sessions().context("reading sessions")?;
-
-    // The real git adapter now backs the board, replacing the no-op stub the
-    // board slice shipped before this adapter landed. NOTE: node_health and
-    // traceability each query git per node, so this shells out per node — fine
-    // for M2 board sizes, batchable later if it becomes a cost.
     let git = Git::new(ws.root());
-
-    let mut board_nodes = Vec::new();
-    for n in &nodes {
-        let stage = match git.branch_facts(&n.branch, &base) {
-            Ok(branch) => {
-                let session = sessions
-                    .iter()
-                    .find(|s| s.dag_node.as_deref() == Some(n.id.as_str()))
-                    .cloned()
-                    // derive_stage ignores the session in M2, so a synthesized
-                    // record (with a throwaway id, never rendered) is sound here.
-                    .unwrap_or_else(|| {
-                        SessionRecord::impl_(SessionId::generate(), &n.spec, &n.id, &n.branch)
-                    });
-                let facts = DeliveryFacts {
-                    branch,
-                    review: None,
-                };
-                Some(derive_stage(&session, &facts))
-            }
-            Err(_) => None,
-        };
-        let health = circuit::cockpit::rollup::node_health(&git, &n.branch);
-        board_nodes.push(BoardNode {
-            id: n.id.clone(),
-            depends_on: n.depends_on.clone(),
-            stage,
-            health,
-        });
-    }
-
-    let board = Board { nodes: board_nodes };
-    print!("{}", dag_board::render(&board));
-
-    // Per-node readout, sorted by id (matches the board's node order).
-    println!("\n--- nodes ---");
-    let mut sorted: Vec<&BoardNode> = board.nodes.iter().collect();
-    sorted.sort_by(|a, b| a.id.cmp(&b.id));
-    let healths: Vec<_> = sorted.iter().map(|n| n.health).collect();
-    for n in &sorted {
-        println!(
-            "  {}  {}  {}",
-            n.id,
-            dag_board::stage_cell(&n.stage),
-            dag_board::glyph(n.health)
-        );
-    }
-
-    let spec_health = circuit::cockpit::health::rollup_children(&healths);
-    let trace = circuit::cockpit::rollup::traceability(&git, &nodes, &base);
-    let m = trace
-        .merged
-        .map(|count| count.to_string())
-        .unwrap_or_else(|| "?".to_string());
-    println!("\nSpec health: {}", dag_board::glyph(spec_health));
-    println!("Tasks: {}/{} done", m, trace.total);
+    let out = circuit::app::board(&ws, &ws, &ws, &git, spec)?;
+    println!("{out}");
     Ok(())
 }
 
