@@ -70,6 +70,7 @@ pub fn render_rail(
     facts: &BranchFacts,
     review: Option<ReviewState>,
     health: Health,
+    archived: bool,
 ) -> String {
     // Spine: current stage wrapped in guillemets, joined by " › ".
     let spine = SPINE
@@ -90,7 +91,8 @@ pub fn render_rail(
         "  (forge state unknown)"
     };
 
-    let line1 = format!("{node_id}  [{}]  {spine}{uncertain}", kind_label(kind));
+    let status_marker = if archived { " (archived)" } else { "" };
+    let line1 = format!("{node_id}  [{}]{status_marker}  {spine}{uncertain}", kind_label(kind));
 
     let line2 = match branch {
         Some(name) => format!(
@@ -132,6 +134,7 @@ mod tests {
             &facts(0),
             Some(ReviewState::None),
             Health::Sound,
+            false,
         );
         assert!(out.contains("‹Project›"), "got: {out}");
         // Other stages are unmarked.
@@ -154,6 +157,7 @@ mod tests {
             &facts(3),
             Some(ReviewState::None),
             Health::Critical,
+            false,
         );
         let line1 = out.lines().next().unwrap();
         assert!(line1.starts_with("auth-slice  [impl]"));
@@ -173,6 +177,7 @@ mod tests {
             &facts(3),
             None,
             Health::Unknown,
+            false,
         );
         assert!(out.contains("PR ?"), "got: {out}");
         assert!(out.contains("(forge state unknown)"), "got: {out}");
@@ -193,6 +198,7 @@ mod tests {
             &facts(1),
             Some(ReviewState::None),
             Health::Unknown,
+            false,
         );
         assert!(out.contains("no PR"));
         assert!(!out.contains("PR ?"));
@@ -212,6 +218,7 @@ mod tests {
             &facts(3),
             Some(ReviewState::None),
             Health::Sound,
+            false,
         );
         assert!(out.contains("branch impl/checkout-auth"));
         assert!(out.contains("3 commits"));
@@ -232,6 +239,7 @@ mod tests {
             &BranchFacts::default(),
             None,
             Health::Unknown,
+            false,
         );
         assert!(out.contains("no branch"));
         assert!(!out.contains("commits"));
@@ -251,6 +259,7 @@ mod tests {
             &facts(2),
             Some(ReviewState::Open),
             Health::Sound,
+            false,
         );
         // The colorless invariant (§8): no ESC byte anywhere.
         assert!(!out.contains('\u{1b}'), "rail must be colorless");
@@ -287,6 +296,7 @@ mod tests {
             &facts(2),
             Some(ReviewState::ChangesRequested),
             Health::Sound,
+            false,
         );
         assert!(out.contains("PR changes requested"), "got: {out}");
     }
@@ -305,9 +315,41 @@ mod tests {
             &facts(5),
             Some(ReviewState::Merged),
             Health::Sound,
+            false,
         );
         assert!(out.contains("[fix]"), "got: {out}");
         assert!(out.contains("‹Done›"), "got: {out}");
         assert!(out.contains("PR merged"));
+    }
+
+    #[test]
+    fn archived_session_renders_a_marker_active_does_not() {
+        let view = StageView {
+            stage: Stage::Done,
+            forge_certain: true,
+        };
+        let archived = render_rail(
+            "a",
+            SessionKind::Impl,
+            view,
+            Some("impl/x"),
+            &facts(3),
+            Some(ReviewState::Merged),
+            Health::Sound,
+            true,
+        );
+        assert!(archived.contains("(archived)"), "got: {archived}");
+
+        let active = render_rail(
+            "a",
+            SessionKind::Impl,
+            view,
+            Some("impl/x"),
+            &facts(3),
+            Some(ReviewState::Merged),
+            Health::Sound,
+            false,
+        );
+        assert!(!active.contains("(archived)"), "got: {active}");
     }
 }

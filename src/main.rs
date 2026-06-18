@@ -430,6 +430,7 @@ fn run_flow(selector: Option<&str>, path: &Path) -> Result<()> {
             &facts.branch,
             facts.review,
             Health::Unknown,
+            s.is_archived(),
         ));
     }
     println!("{}", blocks.join("\n\n"));
