@@ -14,7 +14,6 @@ use circuit::flow::rail::render_rail;
 use circuit::flow::stage::derive_stage;
 use circuit::model::local::resolve_worktree_dir;
 use circuit::model::node::DagNode;
-use circuit::model::spec::SpecRecord;
 use circuit::adapters::store::Workspace;
 use circuit::ports::{CheckpointStore, ForgePort, GitPort};
 use circuit::render::dag_board::{self, Board, BoardNode};
@@ -226,10 +225,7 @@ fn run_spec(command: SpecCommand) -> Result<()> {
         } => {
             let ws = Workspace::new(&path);
             require_initialized(&ws)?;
-            let mut spec = SpecRecord::new(&id, title, intent);
-            spec.bounded_contexts = contexts;
-            ws.save_spec(&spec)
-                .with_context(|| format!("writing spec {id}"))?;
+            circuit::app::spec_new(&ws, &ws, &id, title, intent, contexts)?;
             println!("Created spec session: {id}");
             Ok(())
         }

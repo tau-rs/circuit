@@ -6,12 +6,38 @@ use anyhow::Context;
 
 use crate::model::config::Config;
 use crate::model::glossary::Glossary;
-use crate::ports::SettingsRepo;
+use crate::model::spec::SpecRecord;
+use crate::ports::{SettingsRepo, SpecRepo};
 
 /// Outcome of `init`, so `main.rs` can print the right line.
 pub enum InitOutcome {
     AlreadyInitialized,
     Initialized,
+}
+
+/// Fail fast if `.circuit/` was never initialized. (Port-level guard for
+/// use-cases + tests; the CLI keeps its own path-aware guard for the message.)
+pub fn require_initialized<S: SettingsRepo>(settings: &S) -> anyhow::Result<()> {
+    if !settings.is_initialized() {
+        anyhow::bail!("no .circuit/ workspace — run `circuit init` first");
+    }
+    Ok(())
+}
+
+/// Create a spec session record.
+pub fn spec_new<S: SettingsRepo, R: SpecRepo>(
+    settings: &S,
+    specs: &R,
+    id: &str,
+    title: String,
+    intent: String,
+    contexts: Vec<String>,
+) -> anyhow::Result<()> {
+    require_initialized(settings)?;
+    let mut spec = SpecRecord::new(id, title, intent);
+    spec.bounded_contexts = contexts;
+    specs.save_spec(&spec).with_context(|| format!("writing spec {id}"))?;
+    Ok(())
 }
 
 /// Initialize `.circuit/` settings. Returns whether it was already present.
@@ -40,6 +66,21 @@ mod tests {
     fn init_on_initialized_store_is_noop() {
         let store = MemStore { initialized: true, ..Default::default() };
         assert!(matches!(init(&store).unwrap(), InitOutcome::AlreadyInitialized));
+    }
+
+    #[test]
+    fn spec_new_requires_init() {
+        let store = MemStore::default();
+        let err = spec_new(&store, &store, "checkout", "C".into(), "pay".into(), vec![]).unwrap_err();
+        assert!(err.to_string().contains("circuit init"));
+    }
+
+    #[test]
+    fn spec_new_saves_spec_with_contexts() {
+        let store = MemStore { initialized: true, ..Default::default() };
+        spec_new(&store, &store, "checkout", "Checkout".into(), "Pay.".into(), vec!["billing".into()]).unwrap();
+        let saved = store.specs.borrow().get("checkout").cloned().unwrap();
+        assert_eq!(saved.bounded_contexts, vec!["billing".to_string()]);
     }
 }
 
