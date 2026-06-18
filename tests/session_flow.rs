@@ -351,3 +351,34 @@ fn spawn_refuses_to_clobber_an_existing_branch() {
         .failure()
         .stderr(predicate::str::contains("already exists"));
 }
+
+#[test]
+fn flow_hides_archived_by_default_and_all_shows_with_marker() {
+    let (dir, _wt_root) = spawn_one("impl/checkout-auth");
+    circuit(dir.path())
+        .args(["session", "archive", "auth-slice"])
+        .assert()
+        .success();
+
+    // Default `flow` (no selector) hides the archived impl session.
+    circuit(dir.path())
+        .arg("flow")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[impl]").not());
+
+    // `flow --all` shows it, with the (archived) marker.
+    circuit(dir.path())
+        .args(["flow", "--all"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[impl]"))
+        .stdout(predicate::str::contains("(archived)"));
+
+    // An explicit selector shows the archived session regardless of --all.
+    circuit(dir.path())
+        .args(["flow", "auth-slice"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("(archived)"));
+}

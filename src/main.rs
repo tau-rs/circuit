@@ -60,6 +60,9 @@ enum Command {
     Flow {
         /// Session id (ULID) or unique DAG-node name; omit to show all sessions
         session: Option<String>,
+        /// Include archived sessions in the no-selector list
+        #[arg(long)]
+        all: bool,
         #[arg(long, default_value = ".")]
         path: PathBuf,
     },
@@ -168,7 +171,7 @@ fn main() -> Result<()> {
         Command::Spec { command } => run_spec(command),
         Command::Dag { command } => run_dag(command),
         Command::Session { command } => run_session(command),
-        Command::Flow { session, path } => run_flow(session.as_deref(), &path),
+        Command::Flow { session, all, path } => run_flow(session.as_deref(), all, &path),
         Command::Board { spec, path } => run_board(&spec, &path),
     }
 }
@@ -508,13 +511,21 @@ fn has_github_remote(root: &Path) -> bool {
 
 /// Render the rail for one session (by ULID, else by unique DAG-node name) or,
 /// when `selector` is `None`, every session in the workspace.
-fn run_flow(selector: Option<&str>, path: &Path) -> Result<()> {
+fn run_flow(selector: Option<&str>, all: bool, path: &Path) -> Result<()> {
     let ws = Workspace::new(path);
     require_initialized(&ws)?;
 
     let sessions = match selector {
+        // An explicit selector always shows the named session, even archived.
         Some(sel) => vec![resolve_session(&ws, sel)?],
-        None => ws.list_sessions().context("listing sessions")?,
+        None => {
+            let mut listed = ws.list_sessions().context("listing sessions")?;
+            // Hide archived sessions by default; --all includes them.
+            if !all {
+                listed.retain(|s| !s.is_archived());
+            }
+            listed
+        }
     };
 
     if sessions.is_empty() {
