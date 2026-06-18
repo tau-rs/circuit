@@ -100,6 +100,20 @@ enum SessionCommand {
         #[arg(long, default_value = ".")]
         path: PathBuf,
     },
+    /// Archive (retire) a session: tear down its worktree, optionally delete
+    /// its branch, and flip status to `archived` (the durable agent-stop signal).
+    Archive {
+        /// Session id (ULID) or unique DAG-node name
+        id: String,
+        /// Also delete the session's branch (default: keep it)
+        #[arg(long)]
+        delete_branch: bool,
+        /// Remove a dirty/locked worktree and delete an un-merged branch
+        #[arg(long)]
+        force: bool,
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -301,6 +315,12 @@ fn run_dag(command: DagCommand) -> Result<()> {
 fn run_session(command: SessionCommand) -> Result<()> {
     match command {
         SessionCommand::Spawn { dag_node, path } => run_session_spawn(&dag_node, &path),
+        SessionCommand::Archive {
+            id,
+            delete_branch,
+            force,
+            path,
+        } => run_session_archive(&id, delete_branch, force, &path),
     }
 }
 
@@ -351,6 +371,64 @@ fn run_session_spawn(dag_node: &str, path: &Path) -> Result<()> {
     println!("Spawned session {id} for node {} (stage: Project)", node.id);
     println!("  branch:   {}", node.branch);
     println!("  worktree: {}", worktree.display());
+    Ok(())
+}
+
+/// Archive a session: locate + remove its worktree (path is never stored, so
+/// we find it by branch in `git worktree list`), optionally delete the branch,
+/// then flip status. Teardown precedes the status flip so a failed teardown
+/// leaves the session truthfully `active`. Idempotent.
+fn run_session_archive(id: &str, delete_branch: bool, force: bool, path: &Path) -> Result<()> {
+    let ws = Workspace::new(path);
+    require_initialized(&ws)?;
+
+    let mut record = resolve_session(&ws, id)?;
+    if record.is_archived() {
+        println!("Session {} already archived.", record.id);
+        return Ok(());
+    }
+
+    let git = Git::new(ws.root());
+
+    // 1. Tear down the worktree, located by branch (never stored). A dirty
+    //    worktree is refused without --force — the finalizer analog: a live
+    //    agent dirties its worktree, so plain archive refuses while it works.
+    if let Some(branch) = &record.branch {
+        let worktrees = git.list_worktrees().context("listing worktrees")?;
+        if let Some(wt) = worktrees
+            .into_iter()
+            .find(|w| w.branch.as_deref() == Some(branch.as_str()))
+        {
+            git.remove_worktree(&wt.path, force).with_context(|| {
+                format!(
+                    "removing worktree at {} (pass --force to discard uncommitted \
+                     changes or unlock — stop the agent first if it is still running)",
+                    wt.path.display()
+                )
+            })?;
+        }
+    }
+
+    // 2. Optionally delete the branch (un-merged requires --force).
+    if delete_branch {
+        if let Some(branch) = &record.branch {
+            git.delete_branch(branch, force).with_context(|| {
+                format!("deleting branch {branch} (pass --force to delete an un-merged branch)")
+            })?;
+        }
+    }
+
+    // 3. Flip the durable status signal.
+    record.archive();
+    ws.save_session(&record)
+        .with_context(|| format!("saving archived session {}", record.id))?;
+
+    println!("Session {} archived — agent session may now end.", record.id);
+    match (&record.branch, delete_branch) {
+        (Some(b), true) => println!("  branch {b} deleted"),
+        (Some(b), false) => println!("  branch {b} kept (use --delete-branch to remove)"),
+        (None, _) => {}
+    }
     Ok(())
 }
 
