@@ -3,3 +3,5 @@ pub mod checkpoints;
 pub mod delivery;
 pub mod forge;
 pub mod git;
+pub mod probe;
+pub mod store;

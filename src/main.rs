@@ -17,7 +17,7 @@ use circuit::model::glossary::Glossary;
 use circuit::model::local::resolve_worktree_dir;
 use circuit::model::node::DagNode;
 use circuit::model::spec::SpecRecord;
-use circuit::model::store::Workspace;
+use circuit::adapters::store::Workspace;
 use circuit::ports::{CheckpointStore, ForgePort, GitPort};
 use circuit::render::dag_board::{self, Board, BoardNode};
 use circuit::session::{SessionId, SessionRecord};
