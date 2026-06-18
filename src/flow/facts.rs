@@ -21,6 +21,8 @@ pub enum ReviewState {
     None,
     /// A PR (or `self-review` checkpoint) is open.
     Open,
+    /// PR open, reviewer requested changes — ball is back with the developer.
+    ChangesRequested,
     /// Approved / mergeable, not yet landed.
     Approved,
     /// Merged via the forge.

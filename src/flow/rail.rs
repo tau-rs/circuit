@@ -52,6 +52,7 @@ fn review_label(r: Option<ReviewState>) -> &'static str {
         None => "PR ?",
         Some(ReviewState::None) => "no PR",
         Some(ReviewState::Open) => "PR open",
+        Some(ReviewState::ChangesRequested) => "PR changes requested",
         Some(ReviewState::Approved) => "PR approved",
         Some(ReviewState::Merged) => "PR merged",
         Some(ReviewState::Closed) => "PR closed",
@@ -61,6 +62,10 @@ fn review_label(r: Option<ReviewState>) -> &'static str {
 /// Render one session's rail. Pure; colorless (§8). `review = None` means the
 /// forge state is undeterminable (printed `PR ?`), distinct from a known `no PR`.
 /// `health` is always rendered from its glyph; this slice passes `Unknown`.
+// Rendering inputs (kind/view/branch/facts/review/health/archived) are each an
+// independent display axis; bundling them into a params struct would add
+// indirection without removing a real dependency. Allowed deliberately.
+#[allow(clippy::too_many_arguments)]
 pub fn render_rail(
     node_id: &str,
     kind: SessionKind,
@@ -69,6 +74,7 @@ pub fn render_rail(
     facts: &BranchFacts,
     review: Option<ReviewState>,
     health: Health,
+    archived: bool,
 ) -> String {
     // Spine: current stage wrapped in guillemets, joined by " › ".
     let spine = SPINE
@@ -89,7 +95,11 @@ pub fn render_rail(
         "  (forge state unknown)"
     };
 
-    let line1 = format!("{node_id}  [{}]  {spine}{uncertain}", kind_label(kind));
+    let status_marker = if archived { " (archived)" } else { "" };
+    let line1 = format!(
+        "{node_id}  [{}]{status_marker}  {spine}{uncertain}",
+        kind_label(kind)
+    );
 
     let line2 = match branch {
         Some(name) => format!(
@@ -131,6 +141,7 @@ mod tests {
             &facts(0),
             Some(ReviewState::None),
             Health::Sound,
+            false,
         );
         assert!(out.contains("‹Project›"), "got: {out}");
         // Other stages are unmarked.
@@ -153,6 +164,7 @@ mod tests {
             &facts(3),
             Some(ReviewState::None),
             Health::Critical,
+            false,
         );
         let line1 = out.lines().next().unwrap();
         assert!(line1.starts_with("auth-slice  [impl]"));
@@ -172,6 +184,7 @@ mod tests {
             &facts(3),
             None,
             Health::Unknown,
+            false,
         );
         assert!(out.contains("PR ?"), "got: {out}");
         assert!(out.contains("(forge state unknown)"), "got: {out}");
@@ -192,6 +205,7 @@ mod tests {
             &facts(1),
             Some(ReviewState::None),
             Health::Unknown,
+            false,
         );
         assert!(out.contains("no PR"));
         assert!(!out.contains("PR ?"));
@@ -211,6 +225,7 @@ mod tests {
             &facts(3),
             Some(ReviewState::None),
             Health::Sound,
+            false,
         );
         assert!(out.contains("branch impl/checkout-auth"));
         assert!(out.contains("3 commits"));
@@ -231,6 +246,7 @@ mod tests {
             &BranchFacts::default(),
             None,
             Health::Unknown,
+            false,
         );
         assert!(out.contains("no branch"));
         assert!(!out.contains("commits"));
@@ -250,6 +266,7 @@ mod tests {
             &facts(2),
             Some(ReviewState::Open),
             Health::Sound,
+            false,
         );
         // The colorless invariant (§8): no ESC byte anywhere.
         assert!(!out.contains('\u{1b}'), "rail must be colorless");
@@ -273,6 +290,25 @@ mod tests {
     }
 
     #[test]
+    fn changes_requested_renders_its_own_label() {
+        let view = StageView {
+            stage: Stage::Review,
+            forge_certain: true,
+        };
+        let out = render_rail(
+            "a",
+            SessionKind::Impl,
+            view,
+            Some("impl/x"),
+            &facts(2),
+            Some(ReviewState::ChangesRequested),
+            Health::Sound,
+            false,
+        );
+        assert!(out.contains("PR changes requested"), "got: {out}");
+    }
+
+    #[test]
     fn renders_fix_kind_and_done_as_current_stage() {
         let view = StageView {
             stage: Stage::Done,
@@ -286,9 +322,41 @@ mod tests {
             &facts(5),
             Some(ReviewState::Merged),
             Health::Sound,
+            false,
         );
         assert!(out.contains("[fix]"), "got: {out}");
         assert!(out.contains("‹Done›"), "got: {out}");
         assert!(out.contains("PR merged"));
+    }
+
+    #[test]
+    fn archived_session_renders_a_marker_active_does_not() {
+        let view = StageView {
+            stage: Stage::Done,
+            forge_certain: true,
+        };
+        let archived = render_rail(
+            "a",
+            SessionKind::Impl,
+            view,
+            Some("impl/x"),
+            &facts(3),
+            Some(ReviewState::Merged),
+            Health::Sound,
+            true,
+        );
+        assert!(archived.contains("(archived)"), "got: {archived}");
+
+        let active = render_rail(
+            "a",
+            SessionKind::Impl,
+            view,
+            Some("impl/x"),
+            &facts(3),
+            Some(ReviewState::Merged),
+            Health::Sound,
+            false,
+        );
+        assert!(!active.contains("(archived)"), "got: {active}");
     }
 }

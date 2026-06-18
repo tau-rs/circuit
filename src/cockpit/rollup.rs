@@ -141,6 +141,12 @@ mod tests {
         fn list_worktrees(&self) -> Result<Vec<Worktree>, Self::Error> {
             Ok(self.worktrees.clone())
         }
+        fn remove_worktree(&self, _path: &StdPath, _force: bool) -> Result<(), Self::Error> {
+            Err(FakeError)
+        }
+        fn delete_branch(&self, _branch: &str, _force: bool) -> Result<(), Self::Error> {
+            Err(FakeError)
+        }
     }
 
     #[test]
@@ -182,6 +188,12 @@ mod tests {
                 Err(FakeError)
             }
             fn list_worktrees(&self) -> Result<Vec<Worktree>, Self::Error> {
+                Err(FakeError)
+            }
+            fn remove_worktree(&self, _p: &StdPath, _force: bool) -> Result<(), Self::Error> {
+                Err(FakeError)
+            }
+            fn delete_branch(&self, _b: &str, _force: bool) -> Result<(), Self::Error> {
                 Err(FakeError)
             }
         }

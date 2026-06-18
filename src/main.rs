@@ -3,6 +3,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
+use circuit::adapters::checkpoints::Checkpoints;
+use circuit::adapters::delivery::{self, DeliveryMode};
+use circuit::adapters::forge::Forge;
 use circuit::adapters::git::Git;
 use circuit::cockpit::health::Health;
 use circuit::dag::{validate, DagError};
@@ -15,7 +18,7 @@ use circuit::model::local::resolve_worktree_dir;
 use circuit::model::node::DagNode;
 use circuit::model::spec::SpecRecord;
 use circuit::model::store::Workspace;
-use circuit::ports::GitPort;
+use circuit::ports::{CheckpointStore, ForgePort, GitPort};
 use circuit::render::dag_board::{self, Board, BoardNode};
 use circuit::session::{SessionId, SessionRecord};
 
@@ -57,6 +60,9 @@ enum Command {
     Flow {
         /// Session id (ULID) or unique DAG-node name; omit to show all sessions
         session: Option<String>,
+        /// Include archived sessions in the no-selector list
+        #[arg(long)]
+        all: bool,
         #[arg(long, default_value = ".")]
         path: PathBuf,
     },
@@ -94,6 +100,28 @@ enum SessionCommand {
     Spawn {
         /// The DAG node id to execute
         dag_node: String,
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+    /// Archive (retire) a session: tear down its worktree, optionally delete
+    /// its branch, and flip status to `archived` (the durable agent-stop signal).
+    Archive {
+        /// Session id (ULID) or unique DAG-node name
+        id: String,
+        /// Also delete the session's branch (default: keep it)
+        #[arg(long)]
+        delete_branch: bool,
+        /// Remove a dirty/locked worktree and delete an un-merged branch
+        #[arg(long)]
+        force: bool,
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+    /// Unarchive (restore) a session: flip status back to `active` and re-add
+    /// the worktree from the kept branch.
+    Unarchive {
+        /// Session id (ULID) or unique DAG-node name
+        id: String,
         #[arg(long, default_value = ".")]
         path: PathBuf,
     },
@@ -143,7 +171,7 @@ fn main() -> Result<()> {
         Command::Spec { command } => run_spec(command),
         Command::Dag { command } => run_dag(command),
         Command::Session { command } => run_session(command),
-        Command::Flow { session, path } => run_flow(session.as_deref(), &path),
+        Command::Flow { session, all, path } => run_flow(session.as_deref(), all, &path),
         Command::Board { spec, path } => run_board(&spec, &path),
     }
 }
@@ -298,6 +326,13 @@ fn run_dag(command: DagCommand) -> Result<()> {
 fn run_session(command: SessionCommand) -> Result<()> {
     match command {
         SessionCommand::Spawn { dag_node, path } => run_session_spawn(&dag_node, &path),
+        SessionCommand::Archive {
+            id,
+            delete_branch,
+            force,
+            path,
+        } => run_session_archive(&id, delete_branch, force, &path),
+        SessionCommand::Unarchive { id, path } => run_session_unarchive(&id, &path),
     }
 }
 
@@ -351,15 +386,153 @@ fn run_session_spawn(dag_node: &str, path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Archive a session: locate + remove its worktree (path is never stored, so
+/// we find it by branch in `git worktree list`), optionally delete the branch,
+/// then flip status. Teardown precedes the status flip so a failed teardown
+/// leaves the session truthfully `active`. Idempotent.
+fn run_session_archive(id: &str, delete_branch: bool, force: bool, path: &Path) -> Result<()> {
+    let ws = Workspace::new(path);
+    require_initialized(&ws)?;
+
+    let mut record = resolve_session(&ws, id)?;
+    if record.is_archived() {
+        println!("Session {} already archived.", record.id);
+        return Ok(());
+    }
+
+    let git = Git::new(ws.root());
+
+    // 1. Tear down the worktree, located by branch (never stored). A dirty
+    //    worktree is refused without --force — the finalizer analog: a live
+    //    agent dirties its worktree, so plain archive refuses while it works.
+    if let Some(branch) = &record.branch {
+        let worktrees = git.list_worktrees().context("listing worktrees")?;
+        if let Some(wt) = worktrees
+            .into_iter()
+            .find(|w| w.branch.as_deref() == Some(branch.as_str()))
+        {
+            git.remove_worktree(&wt.path, force).with_context(|| {
+                format!(
+                    "removing worktree at {} (pass --force to discard uncommitted \
+                     changes or unlock — stop the agent first if it is still running)",
+                    wt.path.display()
+                )
+            })?;
+        }
+    }
+
+    // 2. Optionally delete the branch (un-merged requires --force).
+    if delete_branch {
+        if let Some(branch) = &record.branch {
+            git.delete_branch(branch, force).with_context(|| {
+                format!("deleting branch {branch} (pass --force to delete an un-merged branch)")
+            })?;
+        }
+    }
+
+    // 3. Flip the durable status signal.
+    record.archive();
+    ws.save_session(&record)
+        .with_context(|| format!("saving archived session {}", record.id))?;
+
+    println!(
+        "Session {} archived — agent session may now end.",
+        record.id
+    );
+    match (&record.branch, delete_branch) {
+        (Some(b), true) => println!("  branch {b} deleted"),
+        (Some(b), false) => println!("  branch {b} kept (use --delete-branch to remove)"),
+        (None, _) => {}
+    }
+    Ok(())
+}
+
+/// Restore an archived session: flip status to active, then re-add the worktree
+/// from the kept branch (resolving its path exactly as `spawn` does). If the
+/// branch was deleted (archive --delete-branch), warn instead of recreating.
+fn run_session_unarchive(id: &str, path: &Path) -> Result<()> {
+    let ws = Workspace::new(path);
+    require_initialized(&ws)?;
+
+    let mut record = resolve_session(&ws, id)?;
+    if !record.is_archived() {
+        println!("Session {} is not archived.", record.id);
+        return Ok(());
+    }
+
+    // Status flip is saved before the worktree rehydrate: a later add_worktree
+    // failure then leaves the session truthfully `active` but worktree-less,
+    // which derives an honest stage from branch_facts and is re-runnable by
+    // hand (the idempotent guard above only short-circuits a second unarchive).
+    record.unarchive();
+    ws.save_session(&record)
+        .with_context(|| format!("saving restored session {}", record.id))?;
+    println!("Session {} restored to active.", record.id);
+
+    // Rehydrate the worktree from the kept branch.
+    if let Some(branch) = &record.branch {
+        let git = Git::new(ws.root());
+        let base = ws.load_config().context("loading config.toml")?.base_branch;
+        let exists = git
+            .branch_facts(branch, &base)
+            .with_context(|| format!("checking branch {branch}"))?
+            .exists;
+        if exists {
+            let local = ws.load_local().context("loading local.toml")?;
+            let env = std::env::var("CIRCUIT_WORKTREES_DIR").ok();
+            let worktree =
+                resolve_worktree_dir(env.as_deref(), &local, ws.root(), &record.id.to_string());
+            git.add_worktree(branch, &worktree)
+                .with_context(|| format!("re-adding worktree at {}", worktree.display()))?;
+            println!("  worktree: {}", worktree.display());
+        } else {
+            println!(
+                "  branch {branch} no longer exists — worktree not recreated; \
+                 session derives Draft"
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Is the `gh` CLI installed and runnable? (Auth is checked per-call via the
+/// review_state error path; this only gates which source we consult.)
+fn gh_available() -> bool {
+    std::process::Command::new("gh")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// Does the repo at `root` have a remote pointing at github.com?
+fn has_github_remote(root: &Path) -> bool {
+    std::process::Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["remote", "-v"])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).contains("github.com"))
+        .unwrap_or(false)
+}
+
 /// Render the rail for one session (by ULID, else by unique DAG-node name) or,
 /// when `selector` is `None`, every session in the workspace.
-fn run_flow(selector: Option<&str>, path: &Path) -> Result<()> {
+fn run_flow(selector: Option<&str>, all: bool, path: &Path) -> Result<()> {
     let ws = Workspace::new(path);
     require_initialized(&ws)?;
 
     let sessions = match selector {
+        // An explicit selector always shows the named session, even archived.
         Some(sel) => vec![resolve_session(&ws, sel)?],
-        None => ws.list_sessions().context("listing sessions")?,
+        None => {
+            let mut listed = ws.list_sessions().context("listing sessions")?;
+            // Hide archived sessions by default; --all includes them.
+            if !all {
+                listed.retain(|s| !s.is_archived());
+            }
+            listed
+        }
     };
 
     if sessions.is_empty() {
@@ -369,21 +542,29 @@ fn run_flow(selector: Option<&str>, path: &Path) -> Result<()> {
 
     let config = ws.load_config().context("loading config.toml")?;
     let git = Git::new(ws.root());
+    let mode = delivery::resolve(gh_available(), has_github_remote(ws.root()));
+    let forge = Forge::new(ws.root());
+    let checkpoints = Checkpoints::new(ws.root());
 
     let mut blocks = Vec::new();
     for s in &sessions {
-        // git-only facts; forge/health are out of this slice (review = None,
-        // health = Unknown) and render honestly as `PR ?` / `health ?`.
         let branch_facts = match &s.branch {
             Some(b) => git
                 .branch_facts(b, &config.base_branch)
                 .with_context(|| format!("deriving facts for {b}"))?,
             None => Default::default(),
         };
-        // Build the delivery facts once; borrow its `branch` for the renderer.
+        // Resolve real review state from the selected source. Any adapter Err
+        // (forge unreachable, unreadable checkpoint) degrades to `None` —
+        // the honest "undeterminable" path that renders `PR ?` (§7.2).
+        let review = match (&s.branch, mode) {
+            (Some(b), DeliveryMode::Forge) => forge.review_state(b).ok(),
+            (Some(_), DeliveryMode::Local) => checkpoints.review_state(&s.id.to_string()).ok(),
+            (None, _) => None,
+        };
         let facts = DeliveryFacts {
             branch: branch_facts,
-            review: None,
+            review,
         };
         let view = derive_stage(s, &facts);
         // Label by DAG node when present (impl/fix), else by session id (spec).
@@ -394,8 +575,9 @@ fn run_flow(selector: Option<&str>, path: &Path) -> Result<()> {
             view,
             s.branch.as_deref(),
             &facts.branch,
-            None,
+            facts.review,
             Health::Unknown,
+            s.is_archived(),
         ));
     }
     println!("{}", blocks.join("\n\n"));
