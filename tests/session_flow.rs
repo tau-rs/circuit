@@ -181,6 +181,168 @@ fn local_checkpoint_drives_flow_to_review() {
         .stdout(predicate::str::contains("PR open"));
 }
 
+/// Read the single session record's ULID + raw TOML from a workspace.
+fn read_only_session(dir: &Path) -> (String, String) {
+    let entry = std::fs::read_dir(dir.join(".circuit").join("sessions"))
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .find(|e| e.path().extension().and_then(|x| x.to_str()) == Some("toml"))
+        .expect("a session record was written");
+    let ulid = entry.file_name().to_string_lossy().replace(".toml", "");
+    let text = std::fs::read_to_string(entry.path()).unwrap();
+    (ulid, text)
+}
+
+/// init repo + workspace + a spec + a DAG node + spawn one impl session.
+/// Returns (repo dir, worktree-root dir) — keep both alive for the test.
+fn spawn_one(branch: &str) -> (tempfile::TempDir, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    let wt_root = tempfile::tempdir().unwrap();
+    init_git_repo(dir.path());
+    circuit(dir.path()).arg("init").assert().success();
+    circuit(dir.path())
+        .args([
+            "spec", "new", "checkout", "--title", "C", "--intent", "Pay.",
+        ])
+        .assert()
+        .success();
+    circuit(dir.path())
+        .args([
+            "dag",
+            "add-node",
+            "auth-slice",
+            "--spec",
+            "checkout",
+            "--title",
+            "Auth",
+            "--branch",
+            branch,
+        ])
+        .assert()
+        .success();
+    circuit(dir.path())
+        .env("CIRCUIT_WORKTREES_DIR", wt_root.path())
+        .args(["session", "spawn", "auth-slice"])
+        .assert()
+        .success();
+    (dir, wt_root)
+}
+
+#[test]
+fn archive_frees_worktree_flips_status_keeps_branch_and_is_idempotent() {
+    let (dir, wt_root) = spawn_one("impl/checkout-auth");
+    let (ulid, _) = read_only_session(dir.path());
+    let wt = wt_root.path().join(&ulid);
+    assert!(wt.exists(), "spawn created the worktree");
+
+    // Archive (clean worktree => no --force needed).
+    circuit(dir.path())
+        .args(["session", "archive", "auth-slice"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("archived"))
+        .stdout(predicate::str::contains("agent session may now end"));
+
+    // Worktree gone; status flipped; branch kept.
+    assert!(!wt.exists(), "archive removed the worktree dir");
+    let (_, text) = read_only_session(dir.path());
+    assert!(text.contains("status = \"archived\""), "got: {text}");
+    let branch_listed = Stdcmd::new("git")
+        .arg("-C")
+        .arg(dir.path())
+        .args(["branch", "--list", "impl/checkout-auth"])
+        .output()
+        .unwrap();
+    assert!(
+        !String::from_utf8_lossy(&branch_listed.stdout)
+            .trim()
+            .is_empty(),
+        "branch should be kept by default"
+    );
+
+    // Idempotent: archiving again is a no-op success.
+    circuit(dir.path())
+        .args(["session", "archive", "auth-slice"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("already archived"));
+}
+
+#[test]
+fn archive_refuses_dirty_worktree_without_force_and_delete_branch_needs_force() {
+    let (dir, wt_root) = spawn_one("impl/checkout-auth");
+    let (ulid, _) = read_only_session(dir.path());
+    let wt = wt_root.path().join(&ulid);
+
+    // Dirty the worktree (untracked file) so removal is refused.
+    std::fs::write(wt.join("scratch.txt"), "wip\n").unwrap();
+    circuit(dir.path())
+        .args(["session", "archive", "auth-slice"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--force"));
+    // Status untouched on failed teardown.
+    let (_, text) = read_only_session(dir.path());
+    assert!(!text.contains("status = \"archived\""), "got: {text}");
+
+    // --force discards the dirty worktree; --delete-branch removes the branch.
+    // (The un-merged-branch refusal is covered by the git.rs adapter unit test
+    // delete_branch_removes_merged_with_d_and_unmerged_only_with_force; this
+    // fresh branch is fast-forward-deletable, so --force here only exercises
+    // the dirty-worktree path.)
+    circuit(dir.path())
+        .args([
+            "session",
+            "archive",
+            "auth-slice",
+            "--delete-branch",
+            "--force",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "branch impl/checkout-auth deleted",
+        ));
+    assert!(!wt.exists());
+    let branch_listed = Stdcmd::new("git")
+        .arg("-C")
+        .arg(dir.path())
+        .args(["branch", "--list", "impl/checkout-auth"])
+        .output()
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&branch_listed.stdout)
+            .trim()
+            .is_empty(),
+        "branch should be deleted"
+    );
+}
+
+#[test]
+fn unarchive_flips_status_and_rehydrates_worktree() {
+    let (dir, wt_root) = spawn_one("impl/checkout-auth");
+    let (ulid, _) = read_only_session(dir.path());
+    let wt = wt_root.path().join(&ulid);
+
+    circuit(dir.path())
+        .args(["session", "archive", "auth-slice"])
+        .assert()
+        .success();
+    assert!(!wt.exists());
+
+    // Unarchive (same worktree-root env so the path resolves identically).
+    circuit(dir.path())
+        .env("CIRCUIT_WORKTREES_DIR", wt_root.path())
+        .args(["session", "unarchive", "auth-slice"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("restored"));
+
+    assert!(wt.exists(), "unarchive re-added the worktree");
+    let (_, text) = read_only_session(dir.path());
+    assert!(text.contains("status = \"active\""), "got: {text}");
+}
+
 #[test]
 fn spawn_refuses_to_clobber_an_existing_branch() {
     let dir = tempfile::tempdir().unwrap();
@@ -218,4 +380,35 @@ fn spawn_refuses_to_clobber_an_existing_branch() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("already exists"));
+}
+
+#[test]
+fn flow_hides_archived_by_default_and_all_shows_with_marker() {
+    let (dir, _wt_root) = spawn_one("impl/checkout-auth");
+    circuit(dir.path())
+        .args(["session", "archive", "auth-slice"])
+        .assert()
+        .success();
+
+    // Default `flow` (no selector) hides the archived impl session.
+    circuit(dir.path())
+        .arg("flow")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[impl]").not());
+
+    // `flow --all` shows it, with the (archived) marker.
+    circuit(dir.path())
+        .args(["flow", "--all"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[impl]"))
+        .stdout(predicate::str::contains("(archived)"));
+
+    // An explicit selector shows the archived session regardless of --all.
+    circuit(dir.path())
+        .args(["flow", "auth-slice"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("(archived)"));
 }

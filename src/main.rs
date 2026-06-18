@@ -50,6 +50,9 @@ enum Command {
     Flow {
         /// Session id (ULID) or unique DAG-node name; omit to show all sessions
         session: Option<String>,
+        /// Include archived sessions in the no-selector list
+        #[arg(long)]
+        all: bool,
         #[arg(long, default_value = ".")]
         path: PathBuf,
     },
@@ -87,6 +90,28 @@ enum SessionCommand {
     Spawn {
         /// The DAG node id to execute
         dag_node: String,
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+    /// Archive (retire) a session: tear down its worktree, optionally delete
+    /// its branch, and flip status to `archived` (the durable agent-stop signal).
+    Archive {
+        /// Session id (ULID) or unique DAG-node name
+        id: String,
+        /// Also delete the session's branch (default: keep it)
+        #[arg(long)]
+        delete_branch: bool,
+        /// Remove a dirty/locked worktree and delete an un-merged branch
+        #[arg(long)]
+        force: bool,
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+    /// Unarchive (restore) a session: flip status back to `active` and re-add
+    /// the worktree from the kept branch.
+    Unarchive {
+        /// Session id (ULID) or unique DAG-node name
+        id: String,
         #[arg(long, default_value = ".")]
         path: PathBuf,
     },
@@ -136,7 +161,7 @@ fn main() -> Result<()> {
         Command::Spec { command } => run_spec(command),
         Command::Dag { command } => run_dag(command),
         Command::Session { command } => run_session(command),
-        Command::Flow { session, path } => run_flow(session.as_deref(), &path),
+        Command::Flow { session, all, path } => run_flow(session.as_deref(), all, &path),
         Command::Board { spec, path } => run_board(&spec, &path),
     }
 }
@@ -240,6 +265,13 @@ fn run_dag(command: DagCommand) -> Result<()> {
 fn run_session(command: SessionCommand) -> Result<()> {
     match command {
         SessionCommand::Spawn { dag_node, path } => run_session_spawn(&dag_node, &path),
+        SessionCommand::Archive {
+            id,
+            delete_branch,
+            force,
+            path,
+        } => run_session_archive(&id, delete_branch, force, &path),
+        SessionCommand::Unarchive { id, path } => run_session_unarchive(&id, &path),
     }
 }
 
@@ -259,15 +291,62 @@ fn run_session_spawn(dag_node: &str, path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn run_flow(selector: Option<&str>, path: &Path) -> Result<()> {
+fn run_flow(selector: Option<&str>, all: bool, path: &Path) -> Result<()> {
     let ws = Workspace::new(path);
     require_initialized(&ws)?;
     let git = Git::new(ws.root());
     let forge = Forge::new(ws.root());
     let checkpoints = Checkpoints::new(ws.root());
     let probe = SystemDeliveryProbe::new(ws.root());
-    let out = circuit::app::flow(&ws, &ws, &git, &forge, &checkpoints, &probe, selector)?;
+    let out = circuit::app::flow(&ws, &ws, &git, &forge, &checkpoints, &probe, selector, all)?;
     println!("{out}");
+    Ok(())
+}
+
+/// Archive a session: delegates the worktree/branch teardown + status flip to
+/// the app layer, then prints the outcome.
+fn run_session_archive(id: &str, delete_branch: bool, force: bool, path: &Path) -> Result<()> {
+    let ws = Workspace::new(path);
+    require_initialized(&ws)?;
+    let git = Git::new(ws.root());
+    let out = circuit::app::session_archive(&ws, &ws, &git, id, delete_branch, force)?;
+    if out.already_archived {
+        println!("Session {} already archived.", out.session_id);
+        return Ok(());
+    }
+    println!(
+        "Session {} archived — agent session may now end.",
+        out.session_id
+    );
+    match (&out.branch, delete_branch) {
+        (Some(b), true) => println!("  branch {b} deleted"),
+        (Some(b), false) => println!("  branch {b} kept (use --delete-branch to remove)"),
+        (None, _) => {}
+    }
+    Ok(())
+}
+
+/// Unarchive a session: flips status back to active and rehydrates the worktree
+/// from the kept branch (delegated to the app layer).
+fn run_session_unarchive(id: &str, path: &Path) -> Result<()> {
+    let ws = Workspace::new(path);
+    require_initialized(&ws)?;
+    let git = Git::new(ws.root());
+    let env = std::env::var("CIRCUIT_WORKTREES_DIR").ok();
+    let out = circuit::app::session_unarchive(&ws, &ws, &git, id, env.as_deref(), ws.root())?;
+    if out.was_not_archived {
+        println!("Session {} is not archived.", out.session_id);
+        return Ok(());
+    }
+    println!("Session {} restored to active.", out.session_id);
+    match (&out.rehydrated_worktree, &out.branch_missing) {
+        (Some(wt), _) => println!("  worktree: {}", wt.display()),
+        (None, Some(branch)) => println!(
+            "  branch {branch} no longer exists — worktree not recreated; \
+             session derives Draft"
+        ),
+        (None, None) => {}
+    }
     Ok(())
 }
 

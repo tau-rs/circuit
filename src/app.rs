@@ -179,6 +179,145 @@ where
     })
 }
 
+/// Outcome of `session_archive`, so the CLI edge prints the right lines.
+pub struct ArchiveOutcome {
+    pub session_id: String,
+    pub branch: Option<String>,
+    pub already_archived: bool,
+}
+
+/// Archive (retire) a session: tear down its worktree (located by branch), then
+/// optionally delete the branch, then flip the durable `archived` status. A
+/// dirty worktree / un-merged branch is refused without `force`.
+pub fn session_archive<S, Se, G>(
+    settings: &S,
+    sessions: &Se,
+    git: &G,
+    id: &str,
+    delete_branch: bool,
+    force: bool,
+) -> anyhow::Result<ArchiveOutcome>
+where
+    S: SettingsRepo,
+    Se: SessionRepo,
+    G: GitPort,
+{
+    require_initialized(settings)?;
+    let mut record = resolve_session(sessions, id)?;
+    if record.is_archived() {
+        return Ok(ArchiveOutcome {
+            session_id: record.id.to_string(),
+            branch: record.branch.clone(),
+            already_archived: true,
+        });
+    }
+    // 1. Tear down the worktree, located by branch (never stored).
+    if let Some(branch) = &record.branch {
+        let worktrees = git.list_worktrees().context("listing worktrees")?;
+        if let Some(wt) = worktrees
+            .into_iter()
+            .find(|w| w.branch.as_deref() == Some(branch.as_str()))
+        {
+            git.remove_worktree(&wt.path, force).with_context(|| {
+                format!(
+                    "removing worktree at {} (pass --force to discard uncommitted \
+                     changes or unlock — stop the agent first if it is still running)",
+                    wt.path.display()
+                )
+            })?;
+        }
+    }
+    // 2. Optionally delete the branch (un-merged requires --force).
+    if delete_branch {
+        if let Some(branch) = &record.branch {
+            git.delete_branch(branch, force).with_context(|| {
+                format!("deleting branch {branch} (pass --force to delete an un-merged branch)")
+            })?;
+        }
+    }
+    // 3. Flip the durable status signal.
+    record.archive();
+    sessions
+        .save_session(&record)
+        .with_context(|| format!("saving archived session {}", record.id))?;
+    Ok(ArchiveOutcome {
+        session_id: record.id.to_string(),
+        branch: record.branch.clone(),
+        already_archived: false,
+    })
+}
+
+/// Outcome of `session_unarchive`.
+pub struct UnarchiveOutcome {
+    pub session_id: String,
+    pub was_not_archived: bool,
+    /// `Some(path)` when the worktree was rehydrated from a kept branch.
+    pub rehydrated_worktree: Option<PathBuf>,
+    /// `Some(branch)` when the branch was gone, so no worktree was recreated.
+    pub branch_missing: Option<String>,
+}
+
+/// Restore an archived session: flip status to active (saved first, so a later
+/// worktree failure leaves the session truthfully active but worktree-less),
+/// then re-add the worktree from the kept branch.
+pub fn session_unarchive<S, Se, G>(
+    settings: &S,
+    sessions: &Se,
+    git: &G,
+    id: &str,
+    worktrees_env: Option<&str>,
+    repo_root: &Path,
+) -> anyhow::Result<UnarchiveOutcome>
+where
+    S: SettingsRepo,
+    Se: SessionRepo,
+    G: GitPort,
+{
+    require_initialized(settings)?;
+    let mut record = resolve_session(sessions, id)?;
+    if !record.is_archived() {
+        return Ok(UnarchiveOutcome {
+            session_id: record.id.to_string(),
+            was_not_archived: true,
+            rehydrated_worktree: None,
+            branch_missing: None,
+        });
+    }
+    record.unarchive();
+    sessions
+        .save_session(&record)
+        .with_context(|| format!("saving restored session {}", record.id))?;
+
+    let mut rehydrated_worktree = None;
+    let mut branch_missing = None;
+    if let Some(branch) = &record.branch {
+        let base = settings
+            .load_config()
+            .context("loading config.toml")?
+            .base_branch;
+        let exists = git
+            .branch_facts(branch, &base)
+            .with_context(|| format!("checking branch {branch}"))?
+            .exists;
+        if exists {
+            let local = settings.load_local().context("loading local.toml")?;
+            let worktree =
+                resolve_worktree_dir(worktrees_env, &local, repo_root, &record.id.to_string());
+            git.add_worktree(branch, &worktree)
+                .with_context(|| format!("re-adding worktree at {}", worktree.display()))?;
+            rehydrated_worktree = Some(worktree);
+        } else {
+            branch_missing = Some(branch.clone());
+        }
+    }
+    Ok(UnarchiveOutcome {
+        session_id: record.id.to_string(),
+        was_not_archived: false,
+        rehydrated_worktree,
+        branch_missing,
+    })
+}
+
 /// Resolve a selector: exact ULID, else a unique DAG-node-name match.
 pub fn resolve_session<Se: SessionRepo>(
     sessions: &Se,
@@ -345,6 +484,7 @@ pub fn flow<S, Se, G, F, C, P>(
     checkpoints: &C,
     probe: &P,
     selector: Option<&str>,
+    all: bool,
 ) -> anyhow::Result<String>
 where
     S: SettingsRepo,
@@ -355,8 +495,16 @@ where
     P: DeliveryProbe,
 {
     let sessions_list = match selector {
+        // An explicit selector always shows the named session, even archived.
         Some(sel) => vec![resolve_session(sessions, sel)?],
-        None => sessions.list_sessions().context("listing sessions")?,
+        None => {
+            let mut listed = sessions.list_sessions().context("listing sessions")?;
+            // Hide archived sessions by default; `all` includes them.
+            if !all {
+                listed.retain(|s| !s.is_archived());
+            }
+            listed
+        }
     };
     if sessions_list.is_empty() {
         return Ok("No sessions yet.".to_string());
@@ -390,6 +538,7 @@ where
             &facts.branch,
             facts.review,
             Health::Unknown,
+            s.is_archived(),
         ));
     }
     Ok(blocks.join("\n\n"))
@@ -541,6 +690,12 @@ mod tests {
         fn list_worktrees(&self) -> Result<Vec<crate::ports::Worktree>, Self::Error> {
             Ok(vec![])
         }
+        fn remove_worktree(&self, _p: &std::path::Path, _f: bool) -> Result<(), Self::Error> {
+            Ok(())
+        }
+        fn delete_branch(&self, _b: &str, _f: bool) -> Result<(), Self::Error> {
+            Ok(())
+        }
     }
 
     struct NoopGit;
@@ -561,6 +716,12 @@ mod tests {
         }
         fn list_worktrees(&self) -> Result<Vec<crate::ports::Worktree>, Self::Error> {
             Ok(vec![])
+        }
+        fn remove_worktree(&self, _p: &std::path::Path, _f: bool) -> Result<(), Self::Error> {
+            Ok(())
+        }
+        fn delete_branch(&self, _b: &str, _f: bool) -> Result<(), Self::Error> {
+            Ok(())
         }
     }
     struct NoopForge;
@@ -611,6 +772,7 @@ mod tests {
             &NoopCheckpoints,
             &probe,
             None,
+            false,
         )
         .unwrap();
         assert_eq!(out, "No sessions yet.");
