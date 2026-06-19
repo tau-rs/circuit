@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#eceef1;font-family:-apple-system,"SF Pro Text","Inter",system-ui,sans-serif;padding:34px;-webkit-font-smoothing:antialiased}
+  h2{font-size:17px;font-weight:600;color:#1a1d24;margin-bottom:3px}
+  .sub{font-size:12.5px;color:#5c6473;margin-bottom:22px}
+
+  :root{--panel:#fff;--bd:#e6e8ec;--tx:#1a1d24;--tx2:#5c6473;--tx3:#98a0ad;
+        --acc:#3b6cf6;--grn:#1a7f37;--amb:#9a6700;--red:#cf222e;--prp:#8250df;--teal:#117a78;}
+
+  .home{max-width:560px;margin:0 auto;background:#fbfcfd;border:1px solid var(--bd);border-radius:18px;box-shadow:0 14px 44px rgba(20,28,46,.10);overflow:hidden}
+
+  /* calm header — "where we are", quiet + clickable */
+  .hdr{padding:22px 26px 18px;border-bottom:1px solid var(--bd)}
+  .brandrow{display:flex;align-items:center;gap:9px;margin-bottom:16px}
+  .logo{width:22px;height:22px;border-radius:7px;background:linear-gradient(135deg,#3b6cf6,#8250df)}
+  .brand{font-size:14px;font-weight:700;color:var(--tx);letter-spacing:-.02em}
+  .status{display:flex;align-items:center;gap:10px;cursor:pointer;padding:6px 0}
+  .status .where{font-size:13px;color:var(--tx);font-weight:600}
+  .progress{flex:1;height:5px;border-radius:3px;background:#eaecef;overflow:hidden;max-width:140px}
+  .progress i{display:block;height:100%;width:83%;background:var(--grn);border-radius:3px}
+  .status .pct{font-size:12px;color:var(--tx2)}
+  .status .health{font-size:12px;color:var(--grn);display:flex;align-items:center;gap:5px}
+  .status .chev{color:var(--tx3);font-size:12px}
+
+  /* the one thing that matters now */
+  .nowlbl{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--tx3);font-weight:600;padding:18px 26px 4px;display:flex;gap:8px;align-items:center}
+  .nowlbl .ct{background:var(--prp);color:#fff;font-size:10px;padding:1px 7px;border-radius:9px;letter-spacing:0}
+
+  /* hero card — focal point with clear primary action */
+  .hero{margin:8px 18px 6px;border:1px solid color-mix(in srgb,var(--prp) 26%,var(--bd));background:color-mix(in srgb,var(--prp) 4%,#fff);border-radius:13px;padding:16px 18px;display:flex;align-items:center;gap:14px;cursor:pointer;transition:.15s}
+  .hero:hover{box-shadow:0 6px 20px rgba(130,80,223,.14);transform:translateY(-1px)}
+  .hero .ic{width:38px;height:38px;border-radius:10px;background:color-mix(in srgb,var(--prp) 13%,#fff);color:var(--prp);display:flex;align-items:center;justify-content:center;font-size:16px;flex:none}
+  .hero .b{flex:1}
+  .hero .t{font-size:14px;color:var(--tx);font-weight:600;margin-bottom:2px}
+  .hero .d{font-size:12px;color:var(--tx2)}
+  .cta{background:var(--prp);color:#fff;font-size:12.5px;font-weight:600;padding:9px 15px;border-radius:9px;border:none;white-space:nowrap}
+
+  /* smaller items — compact, clearly clickable rows */
+  .item{margin:0 18px;display:flex;align-items:center;gap:12px;padding:13px 8px;border-top:1px solid var(--bd);cursor:pointer}
+  .item:hover{background:#f4f6f8}
+  .item .ic{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:12px;flex:none}
+  .ic.flag{background:color-mix(in srgb,var(--teal) 12%,#fff);color:var(--teal)}
+  .ic.block{background:color-mix(in srgb,var(--red) 11%,#fff);color:var(--red)}
+  .item .b{flex:1}
+  .item .t{font-size:13px;color:var(--tx);font-weight:500}
+  .item .d{font-size:11.5px;color:var(--tx3)}
+  .item .act{font-size:12px;color:var(--acc);font-weight:600;white-space:nowrap}
+  .item .chev{color:var(--tx3);font-size:13px}
+
+  /* quiet footer — drill-downs */
+  .foot{display:flex;gap:6px;padding:16px 24px 20px;border-top:1px solid var(--bd);margin-top:8px}
+  .flink{flex:1;text-align:center;font-size:12.5px;color:var(--tx2);font-weight:500;padding:10px;border:1px solid var(--bd);border-radius:10px;background:#fff;cursor:pointer}
+  .flink:hover{border-color:var(--acc);color:var(--acc)}
+
+  .qbox{max-width:560px;margin:20px auto 0;background:#fff;border:1px solid var(--bd);border-left:3px solid var(--acc);padding:15px 18px;border-radius:10px}
+  .qbox h4{font-size:11.5px;color:var(--acc);text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px}
+  .qbox p{font-size:13px;color:var(--tx2);margin:6px 0;line-height:1.5}.qbox b{color:var(--tx)}
+</style>
+</head>
+<body>
+  <h2>Home — "Now"</h2>
+  <div class="sub">Only what's needed at this moment. Everything else is one click deeper.</div>
+
+  <div class="home">
+    <div class="hdr">
+      <div class="brandrow"><span class="logo"></span><span class="brand">Circuit</span></div>
+      <div class="status">
+        <span class="where">M2 · Sessions + flow</span>
+        <span class="progress"><i></i></span>
+        <span class="pct">83%</span>
+        <span class="health">● healthy</span>
+        <span class="chev">›</span>
+      </div>
+    </div>
+
+    <div class="nowlbl">Needs you <span class="ct">3</span></div>
+
+    <div class="hero">
+      <span class="ic">⏸</span>
+      <div class="b">
+        <div class="t">slice-b · forge — design ready</div>
+        <div class="d">Approve the projection to let coding start</div>
+      </div>
+      <button class="cta">Review design →</button>
+    </div>
+
+    <div class="item">
+      <span class="ic flag">⚑</span>
+      <div class="b"><div class="t">m2c · scope-creep</div><div class="d">2 edits map to no task</div></div>
+      <span class="act">⤳ Split</span><span class="chev">›</span>
+    </div>
+    <div class="item">
+      <span class="ic block">⊘</span>
+      <div class="b"><div class="t">slice-x · dropped</div><div class="d">1 dependent needs replan</div></div>
+      <span class="act">Replan</span><span class="chev">›</span>
+    </div>
+
+    <div class="foot">
+      <span class="flink">All sessions →</span>
+      <span class="flink">Architecture →</span>
+      <span class="flink">Roadmap →</span>
+    </div>
+  </div>
+
+  <div class="qbox">
+    <h4>What changed</h4>
+    <p><b>One focal point:</b> the single thing most needing you (slice-b's gate) is a hero card with a clear primary action. Two lesser items are compact rows. Nothing else competes.</p>
+    <p><b>Depth on demand:</b> the status line opens the roadmap; each row opens its session; the footer links go to the full board / architecture. The dashboard's data is all still reachable — just not dumped here.</p>
+    <p><b>Affordances:</b> filled button = primary, chevrons = "opens", hover lift, calm whitespace. Does this read as "all I need right now," with obvious ways deeper?</p>
+  </div>
+</body>
+</html>
