@@ -417,6 +417,47 @@ where
     })
 }
 
+/// Outcome of `session_merge`.
+#[derive(Debug)]
+pub struct MergeOutcome {
+    pub session_id: SessionId,
+    pub branch: String,
+    pub base: String,
+}
+
+/// Merge the session's PR (merge-commit strategy in the adapter). Refused unless
+/// mode is Forge, the session has a branch, and review state is `Approved`.
+pub fn session_merge<S, Se, F, P>(
+    settings: &S,
+    sessions: &Se,
+    forge: &F,
+    probe: &P,
+    selector: &str,
+) -> anyhow::Result<MergeOutcome>
+where
+    S: SettingsRepo,
+    Se: SessionRepo,
+    F: ForgePort,
+    P: DeliveryProbe,
+{
+    let (record, branch, base) = forge_preconditions(settings, sessions, probe, selector)?;
+    match forge
+        .review_state(&branch)
+        .with_context(|| format!("checking PR state for {branch}"))?
+    {
+        ReviewState::Approved => {}
+        other => anyhow::bail!("cannot merge {branch} — review state is {other:?}, not Approved"),
+    }
+    forge
+        .merge(&branch)
+        .with_context(|| format!("merge PR for {branch}"))?;
+    Ok(MergeOutcome {
+        session_id: record.id,
+        branch,
+        base,
+    })
+}
+
 /// Resolve a selector: exact ULID, else a unique DAG-node-name match.
 pub fn resolve_session<Se: SessionRepo>(
     sessions: &Se,
@@ -1130,6 +1171,48 @@ mod tests {
         let body = compose_pr_body(&node_with_intent(""));
         assert!(body.contains("spec `auth`"));
         assert!(body.contains("node `auth-login`"));
+    }
+
+    #[test]
+    fn session_merge_approved_merges() {
+        let (store, _id) = forge_store_with_impl_session("auth-login", "");
+        let forge = SpyForge::with_review(ReviewState::Approved);
+        let out = session_merge(&store, &store, &forge, &forge_probe(), "auth-login").unwrap();
+        assert_eq!(out.branch, "impl/auth-login");
+        assert_eq!(*forge.merged.borrow(), vec!["impl/auth-login".to_string()]);
+    }
+
+    #[test]
+    fn session_merge_not_approved_is_refused() {
+        let (store, _id) = forge_store_with_impl_session("auth-login", "");
+        let forge = SpyForge::with_review(ReviewState::ChangesRequested);
+        let err = session_merge(&store, &store, &forge, &forge_probe(), "auth-login").unwrap_err();
+        assert!(err.to_string().contains("not Approved"), "got: {err}");
+        assert!(forge.merged.borrow().is_empty());
+    }
+
+    #[test]
+    fn session_merge_local_mode_is_refused() {
+        let (store, _id) = forge_store_with_impl_session("auth-login", "");
+        let forge = SpyForge::with_review(ReviewState::Approved);
+        let probe = crate::app::fakes::FakeProbe {
+            gh: false,
+            remote: false,
+        };
+        let err = session_merge(&store, &store, &forge, &probe, "auth-login").unwrap_err();
+        assert!(
+            err.to_string().contains("require a GitHub forge"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn session_merge_forge_error_propagates() {
+        let (store, _id) = forge_store_with_impl_session("auth-login", "");
+        let mut forge = SpyForge::with_review(ReviewState::Approved);
+        forge.action_fails = true;
+        let err = session_merge(&store, &store, &forge, &forge_probe(), "auth-login").unwrap_err();
+        assert!(err.to_string().contains("merge"), "got: {}", err);
     }
 }
 
