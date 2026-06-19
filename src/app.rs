@@ -458,6 +458,47 @@ where
     })
 }
 
+/// Outcome of `session_update`.
+#[derive(Debug)]
+pub struct UpdateOutcome {
+    pub session_id: SessionId,
+    pub branch: String,
+    pub base: String,
+}
+
+/// Update the session's branch from base. Refused unless mode is Forge, the
+/// session has a branch, and a PR is open (Open / ChangesRequested / Approved).
+pub fn session_update<S, Se, F, P>(
+    settings: &S,
+    sessions: &Se,
+    forge: &F,
+    probe: &P,
+    selector: &str,
+) -> anyhow::Result<UpdateOutcome>
+where
+    S: SettingsRepo,
+    Se: SessionRepo,
+    F: ForgePort,
+    P: DeliveryProbe,
+{
+    let (record, branch, base) = forge_preconditions(settings, sessions, probe, selector)?;
+    match forge
+        .review_state(&branch)
+        .with_context(|| format!("checking PR state for {branch}"))?
+    {
+        ReviewState::Open | ReviewState::ChangesRequested | ReviewState::Approved => {}
+        other => anyhow::bail!("no open PR for {branch} to update (state: {other:?})"),
+    }
+    forge
+        .update_from_base(&branch, &base)
+        .with_context(|| format!("updating {branch} from {base}"))?;
+    Ok(UpdateOutcome {
+        session_id: record.id,
+        branch,
+        base,
+    })
+}
+
 /// Resolve a selector: exact ULID, else a unique DAG-node-name match.
 pub fn resolve_session<Se: SessionRepo>(
     sessions: &Se,
@@ -1213,6 +1254,50 @@ mod tests {
         forge.action_fails = true;
         let err = session_merge(&store, &store, &forge, &forge_probe(), "auth-login").unwrap_err();
         assert!(err.to_string().contains("merge"), "got: {}", err);
+    }
+
+    #[test]
+    fn session_update_open_pr_updates() {
+        let (store, _id) = forge_store_with_impl_session("auth-login", "");
+        let forge = SpyForge::with_review(ReviewState::Open);
+        let out = session_update(&store, &store, &forge, &forge_probe(), "auth-login").unwrap();
+        assert_eq!(out.base, "main");
+        assert_eq!(
+            *forge.updated.borrow(),
+            vec![("impl/auth-login".to_string(), "main".to_string())]
+        );
+    }
+
+    #[test]
+    fn session_update_changes_requested_updates() {
+        let (store, _id) = forge_store_with_impl_session("auth-login", "");
+        let forge = SpyForge::with_review(ReviewState::ChangesRequested);
+        session_update(&store, &store, &forge, &forge_probe(), "auth-login").unwrap();
+        assert_eq!(forge.updated.borrow().len(), 1);
+    }
+
+    #[test]
+    fn session_update_no_open_pr_is_refused() {
+        let (store, _id) = forge_store_with_impl_session("auth-login", "");
+        let forge = SpyForge::with_review(ReviewState::None);
+        let err = session_update(&store, &store, &forge, &forge_probe(), "auth-login").unwrap_err();
+        assert!(err.to_string().contains("no open PR"), "got: {err}");
+        assert!(forge.updated.borrow().is_empty());
+    }
+
+    #[test]
+    fn session_update_local_mode_is_refused() {
+        let (store, _id) = forge_store_with_impl_session("auth-login", "");
+        let forge = SpyForge::with_review(ReviewState::Open);
+        let probe = crate::app::fakes::FakeProbe {
+            gh: false,
+            remote: false,
+        };
+        let err = session_update(&store, &store, &forge, &probe, "auth-login").unwrap_err();
+        assert!(
+            err.to_string().contains("require a GitHub forge"),
+            "got: {err}"
+        );
     }
 }
 
