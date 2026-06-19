@@ -450,7 +450,7 @@ where
     }
     forge
         .merge(&branch)
-        .with_context(|| format!("merge PR for {branch}"))?;
+        .with_context(|| format!("merging PR for {branch}"))?;
     Ok(MergeOutcome {
         session_id: record.id,
         branch,
@@ -1095,6 +1095,21 @@ mod tests {
     }
 
     #[test]
+    fn session_pr_no_dag_node_is_refused() {
+        let (store, id) = forge_store_with_impl_session("auth-login", "");
+        {
+            let mut sessions = store.sessions.borrow_mut();
+            let s = sessions.get_mut(&id).unwrap();
+            s.dag_node = None;
+        }
+        let forge = SpyForge::with_review(ReviewState::None);
+        // Use the session UUID as selector so resolve_session succeeds even
+        // with dag_node stripped; the precondition then catches the missing node.
+        let err = session_pr(&store, &store, &store, &forge, &forge_probe(), &id).unwrap_err();
+        assert!(err.to_string().contains("no DAG node"), "got: {err}");
+    }
+
+    #[test]
     fn session_pr_existing_pr_is_refused() {
         let (store, _id) = forge_store_with_impl_session("auth-login", "");
         let forge = SpyForge::with_review(ReviewState::Open);
@@ -1112,7 +1127,8 @@ mod tests {
         let err =
             session_pr(&store, &store, &store, &forge, &forge_probe(), "auth-login").unwrap_err();
         assert!(
-            err.to_string().contains("forge unreachable") || err.to_string().contains("PR state")
+            format!("{err:#}").contains("forge unreachable"),
+            "got: {err:#}"
         );
     }
 
@@ -1253,7 +1269,7 @@ mod tests {
         let mut forge = SpyForge::with_review(ReviewState::Approved);
         forge.action_fails = true;
         let err = session_merge(&store, &store, &forge, &forge_probe(), "auth-login").unwrap_err();
-        assert!(err.to_string().contains("merge"), "got: {}", err);
+        assert!(err.to_string().contains("merging"), "got: {}", err);
     }
 
     #[test]
