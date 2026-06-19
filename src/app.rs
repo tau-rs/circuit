@@ -318,6 +318,20 @@ where
     })
 }
 
+/// PR body = node intent (when non-empty) + a provenance footer tying the PR
+/// back to its spec + DAG node. The footer is always present. Pure.
+fn compose_pr_body(node: &DagNode) -> String {
+    let footer = format!(
+        "---\n🔁 Circuit · spec `{}` · node `{}`",
+        node.spec, node.id
+    );
+    if node.intent.trim().is_empty() {
+        footer
+    } else {
+        format!("{}\n\n{}", node.intent.trim(), footer)
+    }
+}
+
 /// Resolve a selector: exact ULID, else a unique DAG-node-name match.
 pub fn resolve_session<Se: SessionRepo>(
     sessions: &Se,
@@ -845,6 +859,39 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.to_string().contains("already exists"));
+    }
+
+    fn node_with_intent(intent: &str) -> crate::model::node::DagNode {
+        let mut n = crate::model::node::DagNode::new(
+            "auth-login",
+            "auth",
+            "Add login flow",
+            "impl/auth-login",
+        );
+        n.intent = intent.to_string();
+        n
+    }
+
+    #[test]
+    fn pr_body_includes_intent_then_footer() {
+        let body = compose_pr_body(&node_with_intent("Implements OAuth2 login."));
+        assert_eq!(
+            body,
+            "Implements OAuth2 login.\n\n---\n🔁 Circuit · spec `auth` · node `auth-login`"
+        );
+    }
+
+    #[test]
+    fn pr_body_empty_intent_is_footer_only() {
+        let body = compose_pr_body(&node_with_intent("   "));
+        assert_eq!(body, "---\n🔁 Circuit · spec `auth` · node `auth-login`");
+    }
+
+    #[test]
+    fn pr_body_footer_always_carries_spec_and_node() {
+        let body = compose_pr_body(&node_with_intent(""));
+        assert!(body.contains("spec `auth`"));
+        assert!(body.contains("node `auth-login`"));
     }
 }
 
