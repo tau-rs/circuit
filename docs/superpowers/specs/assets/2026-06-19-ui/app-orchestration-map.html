@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#e9ecf0;font-family:-apple-system,"SF Pro Text","Inter",system-ui,sans-serif;padding:26px;-webkit-font-smoothing:antialiased;color:#1a1d24}
+  h2{font-size:17px;font-weight:600;margin-bottom:3px}
+  .sub{font-size:12.5px;color:#5c6473;margin-bottom:18px}
+  :root{--tx:#1a1d24;--tx2:#5c6473;--tx3:#9aa1ae;--bd:#e4e7ec;--acc:#3b6cf6;
+        --grn:#1a9f4a;--amb:#b8860b;--prp:#7c5cdb;--teal:#127f7c;}
+
+  .wrap{display:grid;grid-template-columns:1fr 256px;gap:16px}
+
+  .tiers{display:flex;flex-direction:column;gap:0}
+  .tier{background:#fff;border:1px solid var(--bd);border-radius:13px;padding:14px 16px;box-shadow:0 2px 8px rgba(20,28,46,.05);position:relative}
+  .tier .hd{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+  .num{width:22px;height:22px;border-radius:7px;background:#eef2fb;color:var(--acc);font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center}
+  .tn{font-size:13px;font-weight:700}
+  .scope{margin-left:auto;font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--tx3);font-weight:600}
+  .chips{display:flex;gap:7px;flex-wrap:wrap}
+  .chip{font-size:11px;color:var(--tx2);background:#f5f7fa;border:1px solid var(--bd);border-radius:8px;padding:5px 10px}
+  .chip.k{border-color:#cdd9f7;background:#eef3fe;color:var(--acc);font-weight:600}
+  .arrow{display:flex;align-items:center;justify-content:center;gap:8px;padding:7px 0;color:var(--tx3);font-size:10.5px}
+  .arrow .ln{font-size:14px;color:#b6bdca}
+
+  /* cross-cutting spine */
+  .spine{background:#fff;border:1px solid var(--bd);border-radius:13px;padding:14px 15px;box-shadow:0 2px 8px rgba(20,28,46,.05);align-self:start}
+  .spine h3{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--tx3);font-weight:700;margin-bottom:4px}
+  .spine .lead{font-size:11px;color:var(--tx2);margin-bottom:13px;line-height:1.4}
+  .thread{border-left:2px solid #e4e7ec;padding:9px 0 9px 12px;margin-left:3px;position:relative}
+  .thread::before{content:"";position:absolute;left:-5px;top:13px;width:8px;height:8px;border-radius:50%;background:#fff;border:2px solid var(--c)}
+  .thread .tt{font-size:12px;font-weight:600;color:var(--tx)}
+  .thread .td{font-size:10.5px;color:var(--tx3);margin-top:2px;line-height:1.4}
+
+  .jump{margin-top:10px;font-size:10.5px;color:var(--tx2);background:#f7f9fb;border:1px dashed #c8d2e4;border-radius:9px;padding:9px 11px;line-height:1.5}
+  .jump b{color:var(--acc)}
+
+  .qbox{background:#fff;border:1px solid var(--bd);border-left:3px solid var(--acc);padding:14px 18px;border-radius:10px;margin:18px 0 0}
+  .qbox h4{font-size:11.5px;color:var(--acc);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px}
+  .qbox p{font-size:13px;color:var(--tx2);margin:6px 0;line-height:1.5}.qbox b{color:var(--tx)}
+</style>
+</head>
+<body>
+  <h2>How it all orchestrates — the app map</h2>
+  <div class="sub">Four tiers that zoom into each other (left) · the primitives that thread through every tier (right).</div>
+
+  <div class="wrap">
+    <div class="tiers">
+      <div class="tier">
+        <div class="hd"><span class="num">0</span><span class="tn">Attention &amp; navigation</span><span class="scope">global · cross-project</span></div>
+        <div class="chips">
+          <span class="chip k">Inbox — notify me</span>
+          <span class="chip k">⌘K — jump anywhere</span>
+          <span class="chip">Sidebar · projects ▸ active (grouped)</span>
+        </div>
+      </div>
+
+      <div class="arrow"><span class="ln">↓</span> answer an item / open a project</div>
+
+      <div class="tier">
+        <div class="hd"><span class="num">1</span><span class="tn">Project home — Mission Control / "Now"</span><span class="scope">per project</span></div>
+        <div class="chips">
+          <span class="chip">Direction · M1→M5</span>
+          <span class="chip">Needs-you</span>
+          <span class="chip">Recommended next move</span>
+        </div>
+      </div>
+
+      <div class="arrow"><span class="ln">↓</span> go to the work</div>
+
+      <div class="tier">
+        <div class="hd"><span class="num">2</span><span class="tn">Orchestrate</span><span class="scope">per project</span></div>
+        <div class="chips">
+          <span class="chip">Plan · author DAG</span>
+          <span class="chip">List</span><span class="chip">Board</span><span class="chip">Graph · feature clusters + edges</span>
+          <span class="chip">Suggestions · build·review·recap</span>
+          <span class="chip">Launch · auto·wave·manual</span>
+        </div>
+      </div>
+
+      <div class="arrow"><span class="ln">↓</span> peek → launch / open a session</div>
+
+      <div class="tier">
+        <div class="hd"><span class="num">3</span><span class="tn">Session</span><span class="scope">one slice</span></div>
+        <div class="chips">
+          <span class="chip">Transcript ‖ Architecture · adaptive</span>
+          <span class="chip">Tabs · Overview·Session·Arch·Project</span>
+          <span class="chip">Gate review · Design · Merge</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="spine">
+      <h3>Threads through every tier</h3>
+      <div class="lead">Not screens — primitives that appear at all altitudes.</div>
+
+      <div class="thread" style="--c:var(--acc)"><div class="tt">Flow rail</div><div class="td">goal-driven, gated at Design/Merge · full rail in Session · node-stage on Board/Graph · stage line in Now</div></div>
+      <div class="thread" style="--c:var(--prp)"><div class="tt">Peek panel</div><div class="td">opens from Inbox item · List row · Board card · Graph node → task summary (forward) / delivered (done) → Launch / Open</div></div>
+      <div class="thread" style="--c:var(--grn)"><div class="tt">Cockpit · health</div><div class="td">rolled-up dot on nodes · inspector in Session · never colors the rail (state ≠ flow)</div></div>
+      <div class="thread" style="--c:var(--teal)"><div class="tt">Feature shipping + recap</div><div class="td">features ship when their slices merge · recap of what's done, every tier</div></div>
+      <div class="thread" style="--c:#9aa1ae"><div class="tt">Themes · tokens</div><div class="td">light + dark from one semantic token set · color reserved for state, never overloaded</div></div>
+
+      <div class="jump"><b>Shortcuts skip tiers:</b> an Inbox item or ⌘K jumps <b>straight to a Session</b> (0→3); a gate that needs you pushes <b>back up to the Inbox</b> (3→0).</div>
+    </div>
+  </div>
+
+  <div class="qbox">
+    <h4>The whole thing, orchestrated</h4>
+    <p><b>Zoom hierarchy:</b> Attention layer → Project home → Orchestrate → Session — each drills into the next, and ⌘K / Inbox let you teleport across. <b>Cross-cutting primitives</b> (rail, peek, cockpit, feature-shipping, themes) reappear at every altitude instead of being one-off screens — which is why the flows (1–11) and the three concerns stay consistent everywhere.</p>
+    <p>This is the integration picture. Ready for me to consolidate it all into the spec(s) — flow-track (flows 1–11) + a global-UI spec built on this map?</p>
+  </div>
+</body>
+</html>

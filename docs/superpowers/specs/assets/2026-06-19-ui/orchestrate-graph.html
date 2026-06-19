@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#e9ecf0;font-family:-apple-system,"SF Pro Text","Inter",system-ui,sans-serif;padding:30px;-webkit-font-smoothing:antialiased;color:#1a1d24}
+  h2{font-size:17px;font-weight:600;margin-bottom:3px}
+  .sub{font-size:12.5px;color:#5c6473;margin-bottom:16px}
+  :root{--tx:#1a1d24;--tx2:#5c6473;--tx3:#9aa1ae;--bd:#e4e7ec;--acc:#3b6cf6;--grn:#1a9f4a;}
+
+  .orc{background:#fbfcfd;border:1px solid var(--bd);border-radius:16px;overflow:hidden;box-shadow:0 14px 44px rgba(20,28,46,.12)}
+  .top{display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--bd);background:#fff}
+  .ttl{font-size:13px;font-weight:600}
+  .vtog{display:flex;background:#eef0f3;border-radius:9px;padding:3px}
+  .vtog span{font-size:10.5px;padding:5px 11px;border-radius:6px;color:var(--tx2)}
+  .vtog span.on{background:#fff;color:var(--tx);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+  .grp{margin-left:auto;font-size:11px;color:var(--tx2);display:flex;align-items:center;gap:7px}
+  .grp .seg{display:flex;background:#eef0f3;border-radius:8px;padding:2px}
+  .grp .seg span{font-size:10px;padding:4px 9px;border-radius:6px;color:var(--tx2)}
+  .grp .seg span.on{background:#fff;color:var(--tx);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+
+  .scroller{overflow:auto;padding:22px;background:#eef1f5}
+  .dag{position:relative;width:880px;height:350px}
+  svg.edges{position:absolute;inset:0;z-index:1;pointer-events:none;shape-rendering:crispEdges}
+
+  .fg{position:absolute;background:#f6f8fb;border:1px solid #e0e4ea;border-radius:14px;z-index:0}
+  .fg .strip{position:absolute;left:0;top:14px;bottom:14px;width:3px;border-radius:3px}
+  .fg.ship .strip{background:var(--grn)}.fg.go .strip{background:var(--acc)}.fg.q .strip{background:#c2c8d2}
+  .fg .fh{display:flex;align-items:center;gap:8px;padding:11px 14px 9px}
+  .fg .fname{font-size:11.5px;font-weight:600;color:var(--tx)}
+  .pill{margin-left:auto;font-size:9px;font-weight:600;border-radius:20px;padding:2px 9px}
+  .pill.ship{color:var(--grn);background:#e7f6ec}.pill.go{color:var(--acc);background:#e8effe}.pill.q{color:var(--tx3);background:#eef0f3}
+
+  .node{position:absolute;width:160px;height:56px;background:#fff;border:1px solid var(--bd);border-radius:11px;padding:8px 12px;z-index:2;cursor:pointer;box-shadow:0 1px 3px rgba(20,28,46,.07)}
+  .node:hover{box-shadow:0 5px 16px rgba(20,28,46,.12)}
+  .node .nm{font-size:11.5px;font-weight:600;color:var(--tx);display:flex;align-items:center;gap:6px}
+  .node .ds{font-size:10px;color:var(--tx2);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sdot{width:7px;height:7px;border-radius:50%;flex:none}
+  .node.done{background:#fbfcfd;border-color:#eaedf1}.node.done .nm{color:var(--tx2)}.node.done .sdot{background:var(--grn)}
+  .node.run{border-color:#c2d3fb}.node.run .sdot{background:var(--acc);box-shadow:0 0 0 3px #e8effe}
+  .node.ready{border:1.5px solid var(--acc);box-shadow:0 4px 16px rgba(59,108,246,.20)}.node.ready .sdot{background:#fff;border:2px solid var(--acc);width:9px;height:9px}
+  .node.block{opacity:.6}.node.block .sdot{background:#c2c8d2}
+  .node .tagx{margin-left:auto;font-size:9px;font-weight:600;color:var(--acc);background:#e8effe;border-radius:6px;padding:2px 7px}
+
+  .legend{display:flex;gap:18px;padding:12px 22px;border-top:1px solid var(--bd);background:#fff;font-size:10.5px;color:var(--tx2);flex-wrap:wrap}
+  .legend i{font-style:normal;display:inline-flex;align-items:center;gap:7px}
+  .ll{width:26px;height:0;border-top:2px solid #9aa3b3}.ll.dash{border-top:2px dashed #cdd3dc}.ll.key{border-top:2.5px solid #3b6cf6}
+
+  .qbox{background:#fff;border:1px solid var(--bd);border-left:3px solid var(--acc);padding:14px 18px;border-radius:10px;margin:18px 0 0}
+  .qbox h4{font-size:11.5px;color:var(--acc);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px}
+  .qbox p{font-size:13px;color:var(--tx2);margin:6px 0;line-height:1.5}.qbox b{color:var(--tx)}
+</style>
+</head>
+<body>
+  <h2>Graph — square (orthogonal) routing</h2>
+  <div class="sub">Right-angle elbows, vertical runs in the gutters. Every task link still drawn — intra &amp; inter cluster.</div>
+
+  <div class="orc">
+    <div class="top">
+      <span class="ttl">M2 · Orchestrate</span>
+      <div class="vtog"><span>List</span><span>Board</span><span class="on">Graph</span></div>
+      <span class="grp">group by <span class="seg"><span>Depth</span><span class="on">Feature</span></span></span>
+    </div>
+
+    <div class="scroller">
+      <div class="dag">
+        <div class="fg ship" style="left:8px;top:16px;width:196px;height:220px"><div class="strip"></div><div class="fh"><span class="fname">Foundation &amp; data</span><span class="pill ship">✓ Shipped</span></div></div>
+        <div class="fg ship" style="left:232px;top:16px;width:196px;height:220px"><div class="strip"></div><div class="fh"><span class="fname">Git &amp; visualize</span><span class="pill ship">✓ Shipped</span></div></div>
+        <div class="fg go" style="left:456px;top:16px;width:196px;height:320px"><div class="strip"></div><div class="fh"><span class="fname">Real review state</span><span class="pill go">◐ 0 / 3</span></div></div>
+        <div class="fg q" style="left:680px;top:116px;width:196px;height:120px"><div class="strip"></div><div class="fh"><span class="fname">End-to-end</span><span class="pill q">○ Queued</span></div></div>
+
+        <svg class="edges" width="880" height="350" viewBox="0 0 880 350">
+          <defs>
+            <marker id="ar" markerWidth="8" markerHeight="8" refX="6" refY="3.2" orient="auto"><path d="M0,0 L6.5,3.2 L0,6.4 Z" fill="#9aa3b3"/></marker>
+            <marker id="arb" markerWidth="8" markerHeight="8" refX="6" refY="3.2" orient="auto"><path d="M0,0 L6.5,3.2 L0,6.4 Z" fill="#3b6cf6"/></marker>
+            <marker id="ard" markerWidth="8" markerHeight="8" refX="6" refY="3.2" orient="auto"><path d="M0,0 L6.5,3.2 L0,6.4 Z" fill="#cdd3dc"/></marker>
+          </defs>
+
+          <!-- INTRA F1: foundation -> m2a (vertical) -->
+          <path d="M106,122 L106,164" stroke="#9aa3b3" stroke-width="2" fill="none" marker-end="url(#ar)"/>
+          <!-- INTRA F3: slice-b -> slice-c (vertical, pending) -->
+          <path d="M554,122 L554,164" stroke="#cdd3dc" stroke-width="2" fill="none" stroke-dasharray="5 4" marker-end="url(#ard)"/>
+
+          <!-- INTER F1 -> F2 (horizontal) -->
+          <path d="M186,94 L248,94" stroke="#9aa3b3" stroke-width="2" fill="none" marker-end="url(#ar)"/>
+          <path d="M186,194 L248,194" stroke="#9aa3b3" stroke-width="2" fill="none" marker-end="url(#ar)"/>
+          <!-- INTER F2 -> F3 (horizontal) -->
+          <path d="M410,94 L472,94" stroke="#9aa3b3" stroke-width="2" fill="none" marker-end="url(#ar)"/>
+          <!-- KEY: m2c -> slice-d — square elbow, vertical run in the gutter -->
+          <path d="M410,194 L442,194 L442,294 L472,294" stroke="#3b6cf6" stroke-width="2.5" fill="none" marker-end="url(#arb)"/>
+          <!-- INTER F3 -> F4 (horizontal, pending) -->
+          <path d="M634,194 L696,194" stroke="#cdd3dc" stroke-width="2" fill="none" stroke-dasharray="5 4" marker-end="url(#ard)"/>
+          <!-- slice-d -> slice-e — square elbow up through the gutter -->
+          <path d="M634,294 L666,294 L666,194 L696,194" stroke="#cdd3dc" stroke-width="2" fill="none" stroke-dasharray="5 4" marker-end="url(#ard)"/>
+        </svg>
+
+        <!-- F1 -->
+        <div class="node done" style="left:26px;top:66px"><div class="nm"><span class="sdot"></span>foundation</div><div class="ds">session model · ports</div></div>
+        <div class="node done" style="left:26px;top:166px"><div class="nm"><span class="sdot"></span>m2a · data</div><div class="ds">.circuit/ + DAG</div></div>
+        <!-- F2 -->
+        <div class="node done" style="left:250px;top:66px"><div class="nm"><span class="sdot"></span>slice-a · git</div><div class="ds">git adapter · spawn</div></div>
+        <div class="node done" style="left:250px;top:166px"><div class="nm"><span class="sdot"></span>m2c · board</div><div class="ds">DAG board · roll-up</div></div>
+        <!-- F3 -->
+        <div class="node run" style="left:474px;top:66px"><div class="nm"><span class="sdot"></span>slice-b · forge</div><div class="ds">gh + checkpoints · slow</div></div>
+        <div class="node block" style="left:474px;top:166px"><div class="nm"><span class="sdot"></span>slice-c · delivery</div><div class="ds">forge vs local</div></div>
+        <div class="node ready" style="left:474px;top:266px"><div class="nm"><span class="sdot"></span>slice-d · CLI<span class="tagx">▶ ready</span></div><div class="ds">wire run_flow</div></div>
+        <!-- F4 -->
+        <div class="node block" style="left:698px;top:166px"><div class="nm"><span class="sdot"></span>slice-e · e2e</div><div class="ds">spawn → DAG → flow</div></div>
+      </div>
+    </div>
+
+    <div class="legend">
+      <i><span class="ll"></span> dependency satisfied</i>
+      <i><span class="ll key"></span> unblocks <b>slice-d</b> early (across cluster &amp; depth)</i>
+      <i><span class="ll dash"></span> dependency pending</i>
+    </div>
+  </div>
+
+  <div class="qbox">
+    <h4>Square routing</h4>
+    <p>All edges are now orthogonal elbows — horizontal/vertical segments, right-angle corners, vertical runs tucked in the gutters between clusters. The blue <code>m2c → slice-d</code> link makes a clean step down across the boundary. Intra-cluster links (foundation→m2a, slice-b→slice-c) are straight verticals.</p>
+    <p>Right? If so — lock the Graph and I'll consolidate the whole spec.</p>
+  </div>
+</body>
+</html>

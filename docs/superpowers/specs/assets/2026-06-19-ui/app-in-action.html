@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#dfe3e8;font-family:-apple-system,"SF Pro Text","Inter",system-ui,sans-serif;padding:20px;-webkit-font-smoothing:antialiased;color:#1a1d24}
+  h2{font-size:16px;font-weight:600;margin-bottom:3px}
+  .sub{font-size:12px;color:#5c6473;margin-bottom:12px}
+  :root{--tx:#1a1d24;--tx2:#5c6473;--tx3:#9aa1ae;--bd:#e4e7ec;--bd2:#eef0f3;--acc:#3b6cf6;
+        --grn:#1a9f4a;--amb:#b8860b;--prp:#7c5cdb;}
+
+  .app{display:grid;grid-template-columns:224px 1fr 1.18fr;background:#fbfcfd;border:1px solid #d2d7df;border-radius:14px;overflow:hidden;box-shadow:0 20px 56px rgba(20,28,46,.18);min-height:580px}
+
+  /* enriched sidebar */
+  .side{background:#f6f8fb;border-right:1px solid var(--bd);display:flex;flex-direction:column;min-width:0}
+  .swh{display:flex;align-items:center;gap:8px;padding:11px 12px;border-bottom:1px solid var(--bd)}
+  .logo{width:18px;height:18px;border-radius:5px;background:linear-gradient(135deg,#3b6cf6,#7c5cdb);flex:none}
+  .repo{font-size:12px;font-weight:700;display:flex;align-items:center;gap:5px}
+  .repo .chev{color:var(--tx3);font-size:10px}
+  .newbtn{margin-left:auto;font-size:11px;font-weight:600;color:#fff;background:var(--acc);border-radius:7px;padding:4px 9px;cursor:pointer}
+  .sbody{flex:1;overflow:auto;padding:8px 8px}
+  .search{display:flex;align-items:center;gap:7px;background:#fff;border:1px solid var(--bd);border-radius:8px;padding:6px 9px;font-size:11px;color:var(--tx3);margin-bottom:8px}
+  .search .k{margin-left:auto;font-size:8.5px;background:#eef0f3;border-radius:4px;padding:1px 5px;color:var(--tx2)}
+  .nav{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:7px;font-size:11.5px;color:var(--tx2);cursor:pointer}
+  .nav.on{background:#e8effe;color:var(--acc);font-weight:600}
+  .nav .ct{margin-left:auto;font-size:9px;font-weight:700;color:#fff;background:var(--prp);border-radius:9px;padding:0 6px}
+  .seclbl{font-size:8.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--tx3);font-weight:600;padding:11px 8px 5px;display:flex;align-items:center}
+  .seclbl .x{margin-left:auto;font-size:9px;color:var(--tx3)}
+  .ses{display:flex;gap:8px;padding:6px 8px;border-radius:7px;cursor:pointer;align-items:flex-start}
+  .ses.on{background:#fff;box-shadow:inset 2px 0 0 var(--acc)}
+  .ses:hover{background:#eef2f6}
+  .ses .d{width:7px;height:7px;border-radius:50%;margin-top:3px;flex:none}
+  .d-run{background:var(--acc);box-shadow:0 0 0 3px #e8effe}.d-amb{background:var(--amb)}.d-idle{background:#c2c8d2}
+  .ses .b{flex:1;min-width:0}
+  .ses .nm{font-size:11.5px;font-weight:600;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ses .meta{font-size:9.5px;color:var(--tx3);margin-top:2px;display:flex;gap:7px}
+  .ses .meta .add{color:var(--grn)}.ses .meta .del{color:#c0555a}
+  .ses .badge{font-size:8px;font-weight:700;color:var(--prp);background:#efeafe;border-radius:5px;padding:1px 5px;flex:none;margin-top:1px}
+  .sfoot{border-top:1px solid var(--bd);padding:8px 10px;display:flex;align-items:center;gap:9px;font-size:11px;color:var(--tx2)}
+  .av{width:20px;height:20px;border-radius:50%;background:#cdd6e6;flex:none}
+  .sfoot .gear{margin-left:auto;color:var(--tx3);cursor:pointer}
+
+  /* center transcript */
+  .scribe{border-right:1px solid var(--bd);display:flex;flex-direction:column;min-width:0;background:#fcfdfe}
+  .ctop{padding:10px 14px;border-bottom:1px solid var(--bd)}
+  .crumb{font-size:12px;font-weight:600}.crumb .dim{color:var(--tx3);font-weight:500}
+  .rail{display:flex;align-items:center;gap:2px;margin-top:8px}
+  .rs{font-size:9.5px;padding:2px 7px;border-radius:5px;color:var(--tx3)}
+  .rs.done{color:#8a93a6}.rs.cur{background:#e8effe;color:var(--acc);font-weight:600}
+  .rarr{color:#cdd3dc;font-size:10px}
+  .sh{padding:8px 14px;border-bottom:1px solid var(--bd2);font-size:10px;color:var(--tx2);display:flex;align-items:center;gap:6px}
+  .live{width:6px;height:6px;border-radius:50%;background:var(--acc);box-shadow:0 0 0 3px #e8effe}
+  .stream{flex:1;overflow:auto;padding:8px 14px}
+  .ev{padding:7px 0;border-bottom:1px solid var(--bd2)}.ev:last-child{border:none}
+  .eh{display:flex;align-items:center;gap:7px;font-size:10.5px}
+  .eic{width:17px;height:17px;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:9px;flex:none}
+  .eic.think{background:#f0ecfb;color:var(--prp)}.eic.tool{background:#eaf0fe;color:var(--acc)}.eic.msg{background:#eef0f3;color:var(--tx2)}
+  .eh .ti{font-weight:600}.eh .mt{margin-left:auto;font-size:9px;color:var(--tx3)}
+  .edet{font-size:10px;color:var(--tx2);margin:5px 0 0 24px;line-height:1.4}
+  .edet.code{font-family:ui-monospace,monospace;background:#f5f7fa;border:1px solid var(--bd);border-radius:6px;padding:5px 7px;color:#5c6473}
+  .add{color:var(--grn)}
+  .steer{border-top:1px solid var(--bd);padding:9px 14px}
+  .sbox{border:1px solid var(--bd);border-radius:8px;padding:7px 10px;font-size:10.5px;color:var(--tx3);display:flex}
+  .sbox .k{margin-left:auto;font-size:8.5px;background:#eef0f3;border-radius:4px;padding:1px 5px;color:var(--tx2)}
+
+  /* right lens — mermaid */
+  .lens{display:flex;flex-direction:column;min-width:0;background:#fff}
+  .ltabs{display:flex;gap:2px;padding:7px 12px 0;border-bottom:1px solid var(--bd);align-items:center}
+  .lt{font-size:11px;padding:7px 11px;color:var(--tx3);border-radius:6px 6px 0 0;cursor:pointer}
+  .lt.on{color:var(--tx);font-weight:600;box-shadow:inset 0 -2px 0 var(--acc)}
+  .lt.term,.lt.brow{color:var(--tx3)}
+  .lhealth{margin-left:auto;font-size:9.5px;color:var(--grn);display:flex;gap:5px;align-items:center;padding-right:4px}
+  .lcap{font-size:9px;color:var(--tx3);padding:9px 16px 0;display:flex;align-items:center;gap:7px}
+  .clive{font-size:9px;color:var(--acc);background:#e8effe;border-radius:5px;padding:1px 6px}
+  .mwrap{flex:1;overflow:auto;padding:8px 14px;display:flex;align-items:center;justify-content:center}
+  .mermaid{font-size:13px}
+</style>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({ startOnLoad:true, theme:'base', themeVariables:{
+    fontFamily:'-apple-system, Inter, sans-serif', fontSize:'12px',
+    primaryColor:'#eef4fe', primaryBorderColor:'#3b6cf6', primaryTextColor:'#27508f',
+    lineColor:'#aab2c0', clusterBkg:'#f7f9fc', clusterBorder:'#dfe4ec'
+  }});
+</script>
+</head>
+<body>
+  <h2>Circuit in action — mermaid diagram + enriched panels</h2>
+  <div class="sub">Architecture now renders as real mermaid (the engine's output). Left sidebar filled in to match Conductor's panels.</div>
+
+  <div class="app">
+    <!-- sidebar -->
+    <div class="side">
+      <div class="swh"><span class="logo"></span><span class="repo">circuit <span class="chev">▾</span></span><span class="newbtn">+ New</span></div>
+      <div class="sbody">
+        <div class="search">🔍 Search… <span class="k">⌘K</span></div>
+        <div class="nav"><span>⬓</span> Inbox <span class="ct">2</span></div>
+        <div class="nav"><span>◰</span> My work</div>
+
+        <div class="seclbl">Active · circuit M2 <span class="x">2</span></div>
+        <div class="ses"><span class="d d-amb"></span><div class="b"><div class="nm">m2c · board</div><div class="meta"><span>Review</span><span class="add">+241</span><span>2h</span></div></div></div>
+        <div class="ses on"><span class="d d-run"></span><div class="b"><div class="nm">slice-d · CLI wire</div><div class="meta"><span>Implement</span><span class="add">+18</span><span class="del">−2</span><span>now</span></div></div></div>
+
+        <div class="seclbl">Active · auth-service M1 <span class="x">1</span></div>
+        <div class="ses"><span class="d d-run"></span><div class="b"><div class="nm">token-refresh</div><div class="meta"><span>Implement</span><span class="add">+96</span><span>12m</span></div></div></div>
+
+        <div class="seclbl">Idle <span class="x">1</span></div>
+        <div class="ses"><span class="d d-idle"></span><div class="b"><div class="nm">slice-c · delivery</div><div class="meta"><span>ready</span><span>—</span></div></div></div>
+
+        <div class="seclbl">Archived <span class="x">3 ▸</span></div>
+      </div>
+      <div class="sfoot"><span class="av"></span> Titouan <span class="gear">⚙</span></div>
+    </div>
+
+    <!-- transcript -->
+    <div class="scribe">
+      <div class="ctop">
+        <span class="crumb">circuit <span class="dim">/</span> slice-d · CLI wire</span>
+        <div class="rail"><span class="rs done">Draft ✓</span><span class="rarr">›</span><span class="rs done">Design ✓</span><span class="rarr">›</span><span class="rs cur">Implement</span><span class="rarr">›</span><span class="rs">Review</span><span class="rarr">›</span><span class="rs">Merge</span><span class="rarr">›</span><span class="rs">Done</span></div>
+      </div>
+      <div class="sh"><span class="live"></span> Agent · generating</div>
+      <div class="stream">
+        <div class="ev"><div class="eh"><span class="eic think">✦</span><span class="ti">Thinking</span><span class="mt">8s ▾</span></div><div class="edet">detect mode, then resolve ReviewState into render_rail…</div></div>
+        <div class="ev"><div class="eh"><span class="eic tool">⛏</span><span class="ti">Edit</span><span class="mt"><span class="add">+18</span> main.rs</span></div><div class="edet code">+ let mode = DeliveryMode::detect(&amp;root)?;</div></div>
+        <div class="ev"><div class="eh"><span class="eic tool">⛏</span><span class="ti">Bash</span><span class="mt">cargo test</span></div><div class="edet">14 tests … <span class="add">ok</span></div></div>
+        <div class="ev"><div class="eh"><span class="eic msg">▣</span><span class="ti">Agent</span><span class="mt">now</span></div><div class="edet">Wiring real state next — 1 task left.</div></div>
+      </div>
+      <div class="steer"><div class="sbox">steer the agent… <span class="k">⌘↵</span></div></div>
+    </div>
+
+    <!-- mermaid lens -->
+    <div class="lens">
+      <div class="ltabs">
+        <span class="lt on">Architecture</span><span class="lt">Diff</span><span class="lt term">Terminal</span><span class="lt brow">Browser</span><span class="lt">Projection</span>
+        <span class="lhealth">● healthy</span>
+      </div>
+      <div class="lcap">Derived live · mermaid <span class="clive">● updates as code lands</span></div>
+      <div class="mwrap">
+        <pre class="mermaid">
+graph LR
+  CLI([run_flow]):::adp
+  subgraph D[Domain]
+    FLOW[derive_stage]:::dom
+    RS[ReviewState]:::dom
+  end
+  subgraph P[Ports]
+    FP[ForgePort]:::port
+    CS[CheckpointStore]:::port
+  end
+  subgraph A[Adapters]
+    GH[gh forge]:::adp
+    TOMLN[TOML checkpoints]:::bld
+  end
+  CLI --> FLOW
+  FLOW --> RS
+  FLOW --> FP
+  FLOW --> CS
+  FP --> GH
+  CS --> TOMLN
+  classDef dom fill:#eef4fe,stroke:#3b6cf6,color:#27508f;
+  classDef port fill:#f4eefe,stroke:#7c5cdb,color:#5b3f9a;
+  classDef adp fill:#ffffff,stroke:#cbd2dc,color:#5c6473;
+  classDef bld fill:#ffffff,stroke:#3b6cf6,stroke-width:3px,color:#3b6cf6;
+        </pre>
+      </div>
+    </div>
+  </div>
+
+  <div class="qbox" style="background:#fff;border:1px solid #e4e7ec;border-left:3px solid #3b6cf6;padding:13px 17px;border-radius:10px;margin:16px 0 0">
+    <h4 style="font-size:11px;color:#3b6cf6;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Two fixes</h4>
+    <p style="font-size:12.5px;color:#5c6473;margin:6px 0;line-height:1.5"><b style="color:#1a1d24">Mermaid:</b> the Architecture pane now renders a real mermaid flowchart (hex layers as subgraphs, the building adapter bolded) — the engine already emits mermaid, so this is its native output, live.</p>
+    <p style="font-size:12.5px;color:#5c6473;margin:6px 0;line-height:1.5"><b style="color:#1a1d24">Panels added (vs Conductor):</b> repo switcher + <b>New</b>, richer rows (stage · ±diff · time), <b>Idle</b> &amp; <b>Archived</b> sections, <b>settings/account</b> footer, and <b>Terminal · Browser</b> tabs in the work pane. Missing anything else you saw in Conductor?</p>
+  </div>
+</body>
+</html>

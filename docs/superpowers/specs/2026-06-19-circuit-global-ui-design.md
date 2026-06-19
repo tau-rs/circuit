@@ -9,6 +9,16 @@
 
 ---
 
+## 0. Reference mockups
+
+Low-fidelity prototype screens (interaction model only; not final visuals) preserved under `assets/2026-06-19-ui/`:
+- `app-in-action.html` — full shell: sidebar + session + flow rail + transcript ‖ mermaid architecture
+- `app-orchestration-map.html` — the four-tier IA + cross-cutting primitives
+- `orchestrate-graph.html` — the Graph lens (feature clusters, square/orthogonal edges, per-task links)
+- `mission-control-now.html` — the per-project "Now" home
+
+---
+
 ## 1. Purpose & scope
 
 Defines **how the whole app is organized** — the navigation tiers, the surfaces, and the cross-cutting primitives that recur at every altitude. The flow/delivery track has its own spec (flows 1–11); this spec is the container it lives in, plus the surfaces that aren't flow: navigation, generation control, architecture comprehension, orchestration of many concurrent sessions, and theming.
