@@ -115,6 +115,27 @@ enum SessionCommand {
         #[arg(long, default_value = ".")]
         path: PathBuf,
     },
+    /// Open a PR for the session's branch (title/body from its DAG node).
+    Pr {
+        /// Session id (ULID) or unique DAG-node name
+        id: String,
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+    /// Merge the session's approved PR (merge-commit strategy).
+    Merge {
+        /// Session id (ULID) or unique DAG-node name
+        id: String,
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+    /// Update the session's branch from its base branch.
+    Update {
+        /// Session id (ULID) or unique DAG-node name
+        id: String,
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -272,6 +293,9 @@ fn run_session(command: SessionCommand) -> Result<()> {
             path,
         } => run_session_archive(&id, delete_branch, force, &path),
         SessionCommand::Unarchive { id, path } => run_session_unarchive(&id, &path),
+        SessionCommand::Pr { id, path } => run_session_pr(&id, &path),
+        SessionCommand::Merge { id, path } => run_session_merge(&id, &path),
+        SessionCommand::Update { id, path } => run_session_update(&id, &path),
     }
 }
 
@@ -347,6 +371,44 @@ fn run_session_unarchive(id: &str, path: &Path) -> Result<()> {
         ),
         (None, None) => {}
     }
+    Ok(())
+}
+
+/// Open a PR for the session's branch via the forge adapter.
+fn run_session_pr(id: &str, path: &Path) -> Result<()> {
+    let ws = Workspace::new(path);
+    require_initialized(&ws)?;
+    let forge = Forge::new(ws.root());
+    let probe = SystemDeliveryProbe::new(ws.root());
+    let out = circuit::app::session_pr(&ws, &ws, &ws, &forge, &probe, id)?;
+    println!("Opened PR for session {} (node {})", out.session_id, id);
+    println!("  branch: {} → base: {}", out.branch, out.base);
+    println!("  title:  {}", out.title);
+    Ok(())
+}
+
+/// Merge the session's approved PR via the forge adapter.
+fn run_session_merge(id: &str, path: &Path) -> Result<()> {
+    let ws = Workspace::new(path);
+    require_initialized(&ws)?;
+    let forge = Forge::new(ws.root());
+    let probe = SystemDeliveryProbe::new(ws.root());
+    let out = circuit::app::session_merge(&ws, &ws, &forge, &probe, id)?;
+    println!(
+        "Merged PR for session {} ({} → {})",
+        out.session_id, out.branch, out.base
+    );
+    Ok(())
+}
+
+/// Update the session's branch from base via the forge adapter.
+fn run_session_update(id: &str, path: &Path) -> Result<()> {
+    let ws = Workspace::new(path);
+    require_initialized(&ws)?;
+    let forge = Forge::new(ws.root());
+    let probe = SystemDeliveryProbe::new(ws.root());
+    let out = circuit::app::session_update(&ws, &ws, &forge, &probe, id)?;
+    println!("Updated {} from {}", out.branch, out.base);
     Ok(())
 }
 
