@@ -1,5 +1,17 @@
 pub mod rust;
 
+/// A function declaration extracted from a source file (language-agnostic shape).
+/// `calls` holds the trailing identifier of each call expression in the body
+/// (e.g. `a::b::foo()` and `x.foo()` both contribute `"foo"`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FnDecl {
+    pub name: String,
+    pub is_pub: bool,
+    pub is_test: bool,
+    pub is_main: bool,
+    pub calls: Vec<String>,
+}
+
 /// Extract the top-level crate-internal module a `use` line depends on.
 /// Returns `None` for external crates, `super`/`self` paths, glob/grouped
 /// imports whose first segment is ambiguous, and non-`use` text.
