@@ -36,7 +36,7 @@ pub fn impact(decls: &[(String, FnDecl)], target: &str, max_depth: Option<u32>) 
     let cone = |raw: Vec<(FnId, u32)>| -> Vec<(u32, String)> {
         let mut out: Vec<(u32, String)> = raw
             .into_iter()
-            .filter(|&(_, hop)| hop > 0 && max_depth.map_or(true, |m| hop <= m))
+            .filter(|&(_, hop)| hop > 0 && max_depth.is_none_or(|m| hop <= m))
             .map(|(id, hop)| (hop, g.node(id).qualified()))
             .collect();
         out.sort();
