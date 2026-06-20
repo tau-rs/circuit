@@ -55,7 +55,10 @@ fn collect_calls(node: tree_sitter::Node, src: &str, out: &mut Vec<String>) {
     }
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        collect_calls(child, src, out);
+        // Don't descend into nested functions; they are collected separately by collect_fns
+        if child.kind() != "function_item" {
+            collect_calls(child, src, out);
+        }
     }
 }
 
@@ -173,5 +176,21 @@ mod tests {
         let it_works = &decls[2];
         assert!(it_works.is_test);
         assert!(!it_works.is_pub);
+    }
+
+    #[test]
+    fn nested_fn_calls_do_not_leak_to_outer() {
+        let src = r#"
+            fn outer() {
+                inner();
+                fn inner() { deep(); }
+            }
+        "#;
+        let decls = fn_decls_in_source(src);
+        let outer = decls.iter().find(|d| d.name == "outer").unwrap();
+        let inner = decls.iter().find(|d| d.name == "inner").unwrap();
+        assert!(outer.calls.contains(&"inner".to_string()));
+        assert!(!outer.calls.contains(&"deep".to_string()));
+        assert!(inner.calls.contains(&"deep".to_string()));
     }
 }
