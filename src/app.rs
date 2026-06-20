@@ -663,6 +663,18 @@ pub fn comprehend(path: &std::path::Path) -> anyhow::Result<String> {
     Ok(crate::comprehension::render_text(&result))
 }
 
+/// Structural impact / blast radius (deterministic, no LLM): the dependents
+/// and dependencies cones of a target function, ranked by hop distance.
+pub fn impact(
+    path: &std::path::Path,
+    target: &str,
+    max_depth: Option<u32>,
+) -> anyhow::Result<String> {
+    let decls = crate::comprehension::scan::scan_functions(path)?;
+    let report = crate::comprehension::impact::impact(&decls, target, max_depth);
+    Ok(crate::comprehension::impact::render_text(&report))
+}
+
 /// Render the flow rail for one session or all. Returns the text to print.
 #[allow(clippy::too_many_arguments)]
 pub fn flow<S, Se, G, F, C, P>(
