@@ -54,7 +54,9 @@ mod tests {
         let decls = scan_functions(dir.path()).unwrap();
 
         assert!(decls.iter().any(|(m, d)| m == "root" && d.name == "main"));
-        assert!(decls.iter().any(|(m, d)| m == "domain" && d.name == "greet"));
+        assert!(decls
+            .iter()
+            .any(|(m, d)| m == "domain" && d.name == "greet"));
     }
 
     #[test]

@@ -68,8 +68,7 @@ fn is_test_fn(node: tree_sitter::Node, src: &str) -> bool {
     while let Some(s) = sib {
         match s.kind() {
             "attribute_item" => {
-                if s
-                    .utf8_text(src.as_bytes())
+                if s.utf8_text(src.as_bytes())
                     .map(|t| t.contains("test"))
                     .unwrap_or(false)
                 {

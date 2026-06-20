@@ -111,7 +111,11 @@ mod tests {
         assert_eq!(main.kind, EntryKind::Main);
         assert_eq!(main.members, vec!["domain::greet", "root::main"]);
 
-        let greet = c.groups.iter().find(|g| g.entry == "domain::greet").unwrap();
+        let greet = c
+            .groups
+            .iter()
+            .find(|g| g.entry == "domain::greet")
+            .unwrap();
         assert_eq!(greet.kind, EntryKind::Public);
         assert_eq!(greet.members, vec!["domain::greet"]);
     }
