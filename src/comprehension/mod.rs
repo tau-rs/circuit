@@ -1,4 +1,5 @@
 pub mod callgraph;
+pub mod scan;
 
 use std::fmt::Write;
 
