@@ -4,6 +4,7 @@ pub mod adapters;
 pub mod app;
 pub mod builder;
 pub mod cockpit;
+pub mod comprehension;
 pub mod dag;
 pub mod flow;
 pub mod graph;
