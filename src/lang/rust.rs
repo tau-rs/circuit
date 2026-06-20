@@ -62,6 +62,15 @@ fn collect_calls(node: tree_sitter::Node, src: &str, out: &mut Vec<String>) {
     }
 }
 
+/// True for test-marker attributes (`#[test]`, `#[tokio::test]`, …) but not
+/// `#[cfg(test)]`: compares the attribute path's last segment to `test`,
+/// ignoring any `(..)` argument list.
+fn is_test_attr(text: &str) -> bool {
+    let inner = text.trim().trim_start_matches("#[").trim_end_matches(']');
+    let path = inner.split('(').next().unwrap_or(inner).trim();
+    path.rsplit("::").next().map(|s| s == "test").unwrap_or(false)
+}
+
 /// A function is a test if a preceding attribute (skipping comments) mentions `test`.
 fn is_test_fn(node: tree_sitter::Node, src: &str) -> bool {
     let mut sib = node.prev_sibling();
@@ -69,7 +78,7 @@ fn is_test_fn(node: tree_sitter::Node, src: &str) -> bool {
         match s.kind() {
             "attribute_item" => {
                 if s.utf8_text(src.as_bytes())
-                    .map(|t| t.contains("test"))
+                    .map(is_test_attr)
                     .unwrap_or(false)
                 {
                     return true;
@@ -95,7 +104,10 @@ fn collect_fns(node: tree_sitter::Node, src: &str, out: &mut Vec<FnDecl>) {
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
                 if child.kind() == "visibility_modifier" {
-                    is_pub = true;
+                    is_pub = child
+                        .utf8_text(src.as_bytes())
+                        .map(|t| t.trim() == "pub")
+                        .unwrap_or(false);
                 }
             }
             let mut calls = Vec::new();
@@ -191,5 +203,26 @@ mod tests {
         assert!(outer.calls.contains(&"inner".to_string()));
         assert!(!outer.calls.contains(&"deep".to_string()));
         assert!(inner.calls.contains(&"deep".to_string()));
+    }
+
+    #[test]
+    fn restricted_visibility_is_not_public() {
+        let src = "pub(crate) fn a() {}\npub(super) fn b() {}\npub fn c() {}\nfn d() {}";
+        let decls = fn_decls_in_source(src);
+        let f = |n: &str| decls.iter().find(|d| d.name == n).unwrap();
+        assert!(!f("a").is_pub);
+        assert!(!f("b").is_pub);
+        assert!(f("c").is_pub);
+        assert!(!f("d").is_pub);
+    }
+
+    #[test]
+    fn cfg_test_attr_is_not_a_test_fn() {
+        let src = "#[cfg(test)]\nfn under_cfg() {}\n#[test]\nfn real_test() {}";
+        let decls = fn_decls_in_source(src);
+        let under = decls.iter().find(|d| d.name == "under_cfg").unwrap();
+        let real = decls.iter().find(|d| d.name == "real_test").unwrap();
+        assert!(!under.is_test);
+        assert!(real.is_test);
     }
 }
