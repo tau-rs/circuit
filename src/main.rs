@@ -31,6 +31,16 @@ enum Command {
         #[arg(default_value = ".")]
         path: PathBuf,
     },
+    /// Impact / blast radius: dependents + dependencies of a function (no LLM)
+    Impact {
+        /// Function name or `module::name` to analyze
+        target: String,
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Cap hops in both cones (default: unlimited)
+        #[arg(long)]
+        max_depth: Option<u32>,
+    },
     /// Scaffold the `.circuit/` authored data model in the current repo
     Init {
         #[arg(default_value = ".")]
@@ -184,6 +194,7 @@ fn main() -> Result<()> {
     match cli.command {
         Command::Analyze { path } => run_analyze(&path),
         Command::Comprehend { path } => run_comprehend(&path),
+        Command::Impact { target, path, max_depth } => run_impact(&target, &path, max_depth),
         Command::Init { path } => run_init(&path),
         Command::Spec { command } => run_spec(command),
         Command::Dag { command } => run_dag(command),
@@ -200,6 +211,11 @@ fn run_analyze(path: &Path) -> Result<()> {
 
 fn run_comprehend(path: &Path) -> Result<()> {
     println!("{}", circuit::app::comprehend(path)?);
+    Ok(())
+}
+
+fn run_impact(target: &str, path: &Path, max_depth: Option<u32>) -> Result<()> {
+    println!("{}", circuit::app::impact(path, target, max_depth)?);
     Ok(())
 }
 

@@ -37,3 +37,21 @@ fn comprehend_lists_entry_points() {
         .success()
         .stdout(predicates::str::contains("[main] root::main"));
 }
+
+#[test]
+fn impact_reports_dependents() {
+    let dir = tempdir().unwrap();
+    let src = dir.path().join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(src.join("main.rs"), "fn main() { greet(); }\nfn greet() {}").unwrap();
+
+    Command::cargo_bin("circuit")
+        .unwrap()
+        .arg("impact")
+        .arg("greet")
+        .arg(dir.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("dependents"))
+        .stdout(predicate::str::contains("root::main"));
+}
