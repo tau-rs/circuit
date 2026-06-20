@@ -69,27 +69,58 @@ impl CallGraph {
         self.edges.iter().copied().collect()
     }
 
-    /// All functions reachable from `start` (inclusive), in ascending id order.
-    pub fn reachable(&self, start: FnId) -> Vec<FnId> {
+    /// Forward min-hop BFS from any of `starts` (the start set is hop 0).
+    /// Returns (FnId, hop) ascending by FnId.
+    pub fn reachable_with_depth(&self, starts: &[FnId]) -> Vec<(FnId, u32)> {
         let mut adj: HashMap<FnId, Vec<FnId>> = HashMap::new();
         for &(f, t) in &self.edges {
             adj.entry(f).or_default().push(t);
         }
-        let mut seen = BTreeSet::new();
-        let mut q = VecDeque::new();
-        seen.insert(start);
-        q.push_back(start);
-        while let Some(n) = q.pop_front() {
-            if let Some(next) = adj.get(&n) {
-                for &t in next {
-                    if seen.insert(t) {
-                        q.push_back(t);
-                    }
+        bfs_depths(&adj, starts)
+    }
+
+    /// Reverse min-hop BFS (callers-of-callers) from any of `starts`.
+    pub fn reverse_reachable_with_depth(&self, starts: &[FnId]) -> Vec<(FnId, u32)> {
+        let mut adj: HashMap<FnId, Vec<FnId>> = HashMap::new();
+        for &(f, t) in &self.edges {
+            adj.entry(t).or_default().push(f);
+        }
+        bfs_depths(&adj, starts)
+    }
+
+    /// All functions reachable from `start` (inclusive), in ascending id order.
+    pub fn reachable(&self, start: FnId) -> Vec<FnId> {
+        self.reachable_with_depth(&[start])
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect()
+    }
+}
+
+/// Multi-source min-hop BFS over `adj`. Start set is hop 0; each node is
+/// visited once (cycles terminate). Returns (id, hop) ascending by id.
+fn bfs_depths(adj: &HashMap<FnId, Vec<FnId>>, starts: &[FnId]) -> Vec<(FnId, u32)> {
+    let mut seen: BTreeSet<FnId> = BTreeSet::new();
+    let mut depth: HashMap<FnId, u32> = HashMap::new();
+    let mut q = VecDeque::new();
+    for &s in starts {
+        if seen.insert(s) {
+            depth.insert(s, 0);
+            q.push_back(s);
+        }
+    }
+    while let Some(n) = q.pop_front() {
+        let d = depth[&n];
+        if let Some(next) = adj.get(&n) {
+            for &t in next {
+                if seen.insert(t) {
+                    depth.insert(t, d + 1);
+                    q.push_back(t);
                 }
             }
         }
-        seen.into_iter().collect()
     }
+    seen.into_iter().map(|id| (id, depth[&id])).collect()
 }
 
 #[cfg(test)]
@@ -120,5 +151,28 @@ mod tests {
         assert_eq!(g.edges(), vec![(0, 1)]);
         assert_eq!(g.reachable(0), vec![0, 1]);
         assert_eq!(g.reachable(1), vec![1]);
+    }
+
+    #[test]
+    fn forward_and_reverse_depth() {
+        let decls = vec![
+            ("m".to_string(), decl("run", false, true, &["mid"])),
+            ("m".to_string(), decl("mid", false, false, &["leaf"])),
+            ("m".to_string(), decl("leaf", false, false, &[])),
+        ];
+        let g = CallGraph::build(&decls);
+        // ids: run=0, mid=1, leaf=2
+        assert_eq!(g.reachable_with_depth(&[0]), vec![(0, 0), (1, 1), (2, 2)]);
+        assert_eq!(g.reverse_reachable_with_depth(&[2]), vec![(0, 2), (1, 1), (2, 0)]);
+    }
+
+    #[test]
+    fn cycle_terminates_with_shortest_hops() {
+        let decls = vec![
+            ("m".to_string(), decl("a", false, false, &["b"])),
+            ("m".to_string(), decl("b", false, false, &["a"])),
+        ];
+        let g = CallGraph::build(&decls);
+        assert_eq!(g.reachable_with_depth(&[0]), vec![(0, 0), (1, 1)]);
     }
 }
