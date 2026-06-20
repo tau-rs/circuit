@@ -26,6 +26,11 @@ enum Command {
         #[arg(default_value = ".")]
         path: PathBuf,
     },
+    /// Structural comprehension: entry points + reachable function groups (no LLM)
+    Comprehend {
+        #[arg(default_value = ".")]
+        path: PathBuf,
+    },
     /// Scaffold the `.circuit/` authored data model in the current repo
     Init {
         #[arg(default_value = ".")]
@@ -178,6 +183,7 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Analyze { path } => run_analyze(&path),
+        Command::Comprehend { path } => run_comprehend(&path),
         Command::Init { path } => run_init(&path),
         Command::Spec { command } => run_spec(command),
         Command::Dag { command } => run_dag(command),
@@ -189,6 +195,11 @@ fn main() -> Result<()> {
 
 fn run_analyze(path: &Path) -> Result<()> {
     println!("{}", circuit::app::analyze(path)?);
+    Ok(())
+}
+
+fn run_comprehend(path: &Path) -> Result<()> {
+    println!("{}", circuit::app::comprehend(path)?);
     Ok(())
 }
 
