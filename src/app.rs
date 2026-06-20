@@ -474,6 +474,14 @@ pub fn analyze(path: &std::path::Path) -> anyhow::Result<String> {
     Ok(out)
 }
 
+/// Structural comprehension (deterministic, no LLM): entry points and the
+/// functions reachable from each (the unnamed feature groups).
+pub fn comprehend(path: &std::path::Path) -> anyhow::Result<String> {
+    let decls = crate::comprehension::scan::scan_functions(path)?;
+    let result = crate::comprehension::comprehend(&decls);
+    Ok(crate::comprehension::render_text(&result))
+}
+
 /// Render the flow rail for one session or all. Returns the text to print.
 #[allow(clippy::too_many_arguments)]
 pub fn flow<S, Se, G, F, C, P>(
@@ -845,6 +853,19 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.to_string().contains("already exists"));
+    }
+
+    #[test]
+    fn comprehend_reports_entry_points_for_a_repo() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("src");
+        std::fs::create_dir_all(src.join("domain")).unwrap();
+        std::fs::write(src.join("main.rs"), "fn main() { greet(); }").unwrap();
+        std::fs::write(src.join("domain/mod.rs"), "pub fn greet() {}").unwrap();
+
+        let out = super::comprehend(dir.path()).unwrap();
+        assert!(out.contains("[main] root::main"));
+        assert!(out.contains("domain::greet"));
     }
 }
 
