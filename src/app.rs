@@ -17,10 +17,11 @@ use crate::model::config::Config;
 use crate::model::glossary::Glossary;
 use crate::model::local::resolve_worktree_dir;
 use crate::model::node::DagNode;
+use crate::model::projection::SystemProjection;
 use crate::model::spec::SpecRecord;
 use crate::ports::{
-    CheckpointStore, DagRepo, DeliveryProbe, ForgePort, GitPort, SessionRepo, SettingsRepo,
-    SpecRepo,
+    CheckpointStore, DagRepo, DeliveryProbe, ForgePort, GitPort, ProjectionRepo, SessionRepo,
+    SettingsRepo, SpecRepo,
 };
 use crate::render::dag_board::{self, Board, BoardNode};
 use crate::session::{SessionId, SessionRecord};
@@ -56,6 +57,88 @@ pub fn spec_new<S: SettingsRepo, R: SpecRepo>(
         .save_spec(&spec)
         .with_context(|| format!("writing spec {id}"))?;
     Ok(())
+}
+
+/// Author an empty system projection for an existing spec session.
+pub fn projection_init<S: SettingsRepo, R: SpecRepo, P: ProjectionRepo>(
+    settings: &S,
+    specs: &R,
+    projections: &P,
+    spec: &str,
+) -> anyhow::Result<()> {
+    require_initialized(settings)?;
+    // The spec is the FK target; it must exist first.
+    specs
+        .load_spec(spec)
+        .with_context(|| format!("no spec '{spec}' — create it with `circuit spec new` first"))?;
+    if projections.projection_exists(spec) {
+        anyhow::bail!("a projection for {spec} already exists");
+    }
+    projections
+        .save_projection(&SystemProjection::new(spec))
+        .with_context(|| format!("writing projection {spec}"))?;
+    Ok(())
+}
+
+/// Render a plain-text summary of a spec session's projection.
+pub fn projection_show<S: SettingsRepo, P: ProjectionRepo>(
+    settings: &S,
+    projections: &P,
+    spec: &str,
+) -> anyhow::Result<String> {
+    require_initialized(settings)?;
+    let p = projections
+        .load_projection(spec)
+        .with_context(|| format!("no projection for {spec} — run `circuit projection init {spec}`"))?;
+    Ok(render_projection(&p))
+}
+
+/// Pure text renderer for a system projection. Empty sections render `(none)`.
+fn render_projection(p: &SystemProjection) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "Projection: {}", p.spec);
+
+    let _ = writeln!(out, "Components ({}):", p.component.len());
+    if p.component.is_empty() {
+        let _ = writeln!(out, "  (none)");
+    }
+    for c in &p.component {
+        let _ = writeln!(out, "  - {} [{:?}]", c.name, c.layer);
+    }
+
+    let _ = writeln!(out, "Edges ({}):", p.edge.len());
+    if p.edge.is_empty() {
+        let _ = writeln!(out, "  (none)");
+    }
+    for e in &p.edge {
+        let _ = writeln!(out, "  - {} -> {}", e.from, e.to);
+    }
+
+    let _ = writeln!(out, "Contexts ({}):", p.context.len());
+    if p.context.is_empty() {
+        let _ = writeln!(out, "  (none)");
+    }
+    for c in &p.context {
+        let _ = writeln!(out, "  - {}", c.name);
+    }
+
+    let _ = writeln!(out, "Relationships ({}):", p.relationship.len());
+    if p.relationship.is_empty() {
+        let _ = writeln!(out, "  (none)");
+    }
+    for r in &p.relationship {
+        let _ = writeln!(out, "  - {} -> {} ({})", r.upstream, r.downstream, r.kind);
+    }
+
+    let _ = writeln!(out, "Contracts ({}):", p.contract.len());
+    if p.contract.is_empty() {
+        let _ = writeln!(out, "  (none)");
+    }
+    for c in &p.contract {
+        let _ = writeln!(out, "  - {} [{}] -> {}", c.name, c.provider, c.consumers.join(", "));
+    }
+
+    out
 }
 
 /// Initialize `.circuit/` settings. Returns whether it was already present.
@@ -1315,6 +1398,68 @@ mod tests {
             "got: {err}"
         );
     }
+
+    fn store_with_spec(id: &str) -> MemStore {
+        let store = MemStore { initialized: true, ..Default::default() };
+        store
+            .specs
+            .borrow_mut()
+            .insert(id.into(), crate::model::spec::SpecRecord::new(id, "T", "intent"));
+        store
+    }
+
+    #[test]
+    fn projection_init_writes_skeleton_for_existing_spec() {
+        let store = store_with_spec("checkout");
+        projection_init(&store, &store, &store, "checkout").unwrap();
+        assert!(store.projections.borrow().contains_key("checkout"));
+    }
+
+    #[test]
+    fn projection_init_requires_the_spec_to_exist() {
+        let store = MemStore { initialized: true, ..Default::default() };
+        let err = projection_init(&store, &store, &store, "checkout").unwrap_err();
+        assert!(err.to_string().contains("no spec 'checkout'"), "got: {err}");
+    }
+
+    #[test]
+    fn projection_init_refuses_to_clobber() {
+        let store = store_with_spec("checkout");
+        projection_init(&store, &store, &store, "checkout").unwrap();
+        let err = projection_init(&store, &store, &store, "checkout").unwrap_err();
+        assert!(err.to_string().contains("already exists"), "got: {err}");
+    }
+
+    #[test]
+    fn projection_show_renders_populated_projection() {
+        use crate::layer::Layer;
+        use crate::model::projection::{Component, SystemProjection};
+        let store = store_with_spec("checkout");
+        let mut p = SystemProjection::new("checkout");
+        p.component.push(Component { name: "billing".into(), layer: Layer::Domain });
+        store.save_projection(&p).unwrap();
+
+        let out = projection_show(&store, &store, "checkout").unwrap();
+        assert!(out.contains("Projection: checkout"), "got: {out}");
+        assert!(out.contains("Components (1)"), "got: {out}");
+        assert!(out.contains("billing"), "got: {out}");
+    }
+
+    #[test]
+    fn projection_show_renders_empty_sections_as_none() {
+        let store = store_with_spec("checkout");
+        store.save_projection(&crate::model::projection::SystemProjection::new("checkout")).unwrap();
+        let out = projection_show(&store, &store, "checkout").unwrap();
+        assert!(out.contains("Components (0)"), "got: {out}");
+        assert!(out.contains("(none)"), "got: {out}");
+    }
+
+    #[test]
+    fn projection_show_bails_when_absent() {
+        let store = store_with_spec("checkout");
+        let err = projection_show(&store, &store, "checkout").unwrap_err();
+        assert!(err.to_string().contains("no projection for checkout"), "got: {err}");
+    }
 }
 
 #[cfg(test)]
@@ -1326,8 +1471,9 @@ pub(crate) mod fakes {
     use crate::model::glossary::Glossary;
     use crate::model::local::LocalConfig;
     use crate::model::node::DagNode;
+    use crate::model::projection::SystemProjection;
     use crate::model::spec::SpecRecord;
-    use crate::ports::{DagRepo, DeliveryProbe, SessionRepo, SettingsRepo, SpecRepo};
+    use crate::ports::{DagRepo, DeliveryProbe, ProjectionRepo, SessionRepo, SettingsRepo, SpecRepo};
     use crate::session::SessionRecord;
 
     #[derive(Debug)]
@@ -1348,6 +1494,7 @@ pub(crate) mod fakes {
         pub specs: RefCell<HashMap<String, SpecRecord>>,
         pub nodes: RefCell<HashMap<String, DagNode>>,
         pub sessions: RefCell<HashMap<String, SessionRecord>>,
+        pub projections: RefCell<HashMap<String, SystemProjection>>,
     }
 
     impl SettingsRepo for MemStore {
@@ -1419,6 +1566,25 @@ pub(crate) mod fakes {
         }
         fn list_sessions(&self) -> Result<Vec<SessionRecord>, FakeErr> {
             Ok(self.sessions.borrow().values().cloned().collect())
+        }
+    }
+    impl ProjectionRepo for MemStore {
+        type Error = FakeErr;
+        fn load_projection(&self, spec: &str) -> Result<SystemProjection, FakeErr> {
+            self.projections
+                .borrow()
+                .get(spec)
+                .cloned()
+                .ok_or_else(|| FakeErr(format!("no projection {spec}")))
+        }
+        fn save_projection(&self, p: &SystemProjection) -> Result<(), FakeErr> {
+            self.projections
+                .borrow_mut()
+                .insert(p.spec.clone(), p.clone());
+            Ok(())
+        }
+        fn projection_exists(&self, spec: &str) -> bool {
+            self.projections.borrow().contains_key(spec)
         }
     }
 
