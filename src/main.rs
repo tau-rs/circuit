@@ -63,6 +63,11 @@ enum Command {
         #[arg(long, default_value = ".")]
         path: PathBuf,
     },
+    /// System-level projection commands
+    Projection {
+        #[command(subcommand)]
+        command: ProjectionCommand,
+    },
 }
 
 #[derive(Subcommand)]
@@ -78,6 +83,24 @@ enum SpecCommand {
         /// Bounded context (repeatable)
         #[arg(long = "context")]
         contexts: Vec<String>,
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum ProjectionCommand {
+    /// Create a skeleton system projection for an existing spec session
+    Init {
+        /// Spec id the projection attaches to (used as the filename)
+        spec: String,
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
+    /// Print a spec session's projection as a text summary
+    Show {
+        /// Spec id whose projection to show
+        spec: String,
         #[arg(long, default_value = ".")]
         path: PathBuf,
     },
@@ -184,6 +207,7 @@ fn main() -> Result<()> {
         Command::Session { command } => run_session(command),
         Command::Flow { session, all, path } => run_flow(session.as_deref(), all, &path),
         Command::Board { spec, path } => run_board(&spec, &path),
+        Command::Projection { command } => run_projection(command),
     }
 }
 
@@ -231,6 +255,25 @@ fn run_spec(command: SpecCommand) -> Result<()> {
             require_initialized(&ws)?;
             circuit::app::spec_new(&ws, &ws, &id, title, intent, contexts)?;
             println!("Created spec session: {id}");
+            Ok(())
+        }
+    }
+}
+
+fn run_projection(command: ProjectionCommand) -> Result<()> {
+    match command {
+        ProjectionCommand::Init { spec, path } => {
+            let ws = Workspace::new(&path);
+            require_initialized(&ws)?;
+            circuit::app::projection_init(&ws, &ws, &ws, &spec)?;
+            println!("Created projection for spec: {spec}");
+            Ok(())
+        }
+        ProjectionCommand::Show { spec, path } => {
+            let ws = Workspace::new(&path);
+            require_initialized(&ws)?;
+            let out = circuit::app::projection_show(&ws, &ws, &spec)?;
+            print!("{out}");
             Ok(())
         }
     }
