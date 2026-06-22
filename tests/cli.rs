@@ -35,7 +35,7 @@ fn comprehend_lists_entry_points() {
         .arg(dir.path())
         .assert()
         .success()
-        .stdout(predicates::str::contains("[main] root::main"));
+        .stdout(predicate::str::contains("[main] root::main"));
 }
 
 #[test]

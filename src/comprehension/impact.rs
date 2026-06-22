@@ -79,9 +79,28 @@ pub fn render_text(r: &ImpactReport) -> String {
             let _ = writeln!(out, "        {t}");
         }
     }
-    let _ = writeln!(out, "impact: {}  ({} target(s))", r.selector, r.targets.len());
-    write_cone(&mut out, "▲ dependents (affected if changed)", &r.dependents);
-    write_cone(&mut out, "▼ dependencies (what it relies on)", &r.dependencies);
+    let noun = if r.targets.len() == 1 {
+        "target"
+    } else {
+        "targets"
+    };
+    let _ = writeln!(
+        out,
+        "impact: {}  ({} {})",
+        r.selector,
+        r.targets.len(),
+        noun
+    );
+    write_cone(
+        &mut out,
+        "▲ dependents (affected if changed)",
+        &r.dependents,
+    );
+    write_cone(
+        &mut out,
+        "▼ dependencies (what it relies on)",
+        &r.dependencies,
+    );
     out
 }
 
@@ -140,6 +159,9 @@ mod tests {
     fn max_depth_caps_both_cones() {
         let r = impact(&chain(), "run", Some(1));
         assert_eq!(r.dependencies, vec![(1, "a::mid".to_string())]);
+        // Same shared closure caps the dependents cone: leaf's callers stop at hop 1.
+        let r = impact(&chain(), "leaf", Some(1));
+        assert_eq!(r.dependents, vec![(1, "a::mid".to_string())]);
     }
 
     #[test]
@@ -165,6 +187,7 @@ mod tests {
     fn render_shows_both_cones() {
         let out = render_text(&impact(&chain(), "mid", None));
         assert!(out.contains("impact: mid"));
+        assert!(out.contains("(1 target)"));
         assert!(out.contains("dependents"));
         assert!(out.contains("·1  a::run"));
         assert!(out.contains("dependencies"));
