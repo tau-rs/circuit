@@ -1,4 +1,5 @@
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Layer {
     Domain,
     Application,
@@ -49,5 +50,27 @@ mod tests {
     fn rank_orders_inner_below_outer() {
         assert!(rank(Layer::Domain) < rank(Layer::Adapter));
         assert_eq!(rank(Layer::Unknown), None);
+    }
+
+    #[test]
+    fn layer_round_trips_as_lowercase_string() {
+        #[derive(serde::Serialize, serde::Deserialize, PartialEq, Debug)]
+        struct Wrap {
+            layer: Layer,
+        }
+        for (variant, name) in [
+            (Layer::Domain, "domain"),
+            (Layer::Application, "application"),
+            (Layer::Adapter, "adapter"),
+            (Layer::Unknown, "unknown"),
+        ] {
+            let text = toml::to_string(&Wrap { layer: variant }).unwrap();
+            assert!(
+                text.contains(&format!("layer = \"{name}\"")),
+                "got: {text}"
+            );
+            let back: Wrap = toml::from_str(&text).unwrap();
+            assert_eq!(back.layer, variant);
+        }
     }
 }
