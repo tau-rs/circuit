@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use crate::model::{
-    config::Config, glossary::Glossary, load_toml, local::LocalConfig, node::DagNode, save_toml,
-    spec::SpecRecord, ModelError,
+    config::Config, glossary::Glossary, load_toml, local::LocalConfig, node::DagNode,
+    projection::SystemProjection, save_toml, spec::SpecRecord, ModelError,
 };
 use crate::session::SessionRecord;
 
@@ -101,6 +101,26 @@ impl Workspace {
         save_toml(&self.dag_node_path(&n.id), n)
     }
 
+    pub fn projections_dir(&self) -> PathBuf {
+        self.circuit_dir().join("projections")
+    }
+
+    pub fn projection_path(&self, spec: &str) -> PathBuf {
+        self.projections_dir().join(format!("{spec}.toml"))
+    }
+
+    pub fn load_projection(&self, spec: &str) -> Result<SystemProjection, ModelError> {
+        load_toml(&self.projection_path(spec))
+    }
+
+    pub fn save_projection(&self, p: &SystemProjection) -> Result<(), ModelError> {
+        save_toml(&self.projection_path(&p.spec), p)
+    }
+
+    pub fn projection_exists(&self, spec: &str) -> bool {
+        self.projection_path(spec).exists()
+    }
+
     /// All DAG nodes, sorted by file path for deterministic order.
     pub fn list_dag_nodes(&self) -> Result<Vec<DagNode>, ModelError> {
         let dir = self.dag_dir();
@@ -164,7 +184,7 @@ impl Workspace {
     }
 }
 
-use crate::ports::{DagRepo, SessionRepo, SettingsRepo, SpecRepo};
+use crate::ports::{DagRepo, ProjectionRepo, SessionRepo, SettingsRepo, SpecRepo};
 
 impl SettingsRepo for Workspace {
     type Error = ModelError;
@@ -206,6 +226,18 @@ impl DagRepo for Workspace {
     }
     fn list_dag_nodes(&self) -> Result<Vec<DagNode>, ModelError> {
         Workspace::list_dag_nodes(self)
+    }
+}
+impl ProjectionRepo for Workspace {
+    type Error = ModelError;
+    fn load_projection(&self, spec: &str) -> Result<SystemProjection, ModelError> {
+        Workspace::load_projection(self, spec)
+    }
+    fn save_projection(&self, p: &SystemProjection) -> Result<(), ModelError> {
+        Workspace::save_projection(self, p)
+    }
+    fn projection_exists(&self, spec: &str) -> bool {
+        Workspace::projection_exists(self, spec)
     }
 }
 impl SessionRepo for Workspace {
@@ -320,5 +352,22 @@ mod tests {
         expected_ids.sort();
         let got_ids: Vec<String> = got.iter().map(|s| s.id.to_string()).collect();
         assert_eq!(got_ids, expected_ids);
+    }
+
+    #[test]
+    fn projection_round_trips_through_disk_and_exists_flips() {
+        use crate::model::projection::{Component, SystemProjection};
+        use crate::layer::Layer;
+        let dir = tempfile::tempdir().unwrap();
+        let ws = Workspace::new(dir.path());
+
+        assert!(!ws.projection_exists("checkout"));
+
+        let mut p = SystemProjection::new("checkout");
+        p.component.push(Component { name: "billing".into(), layer: Layer::Domain });
+        ws.save_projection(&p).unwrap();
+
+        assert!(ws.projection_exists("checkout"));
+        assert_eq!(ws.load_projection("checkout").unwrap(), p);
     }
 }

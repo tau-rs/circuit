@@ -10,6 +10,7 @@ use crate::model::config::Config;
 use crate::model::glossary::Glossary;
 use crate::model::local::LocalConfig;
 use crate::model::node::DagNode;
+use crate::model::projection::SystemProjection;
 use crate::model::spec::SpecRecord;
 use crate::session::SessionRecord;
 
@@ -89,6 +90,16 @@ pub trait DagRepo {
     fn load_dag_node(&self, id: &str) -> Result<DagNode, Self::Error>;
     fn save_dag_node(&self, n: &DagNode) -> Result<(), Self::Error>;
     fn list_dag_nodes(&self) -> Result<Vec<DagNode>, Self::Error>;
+}
+
+/// Persistence for a spec session's system-level projection
+/// (`projections/<spec-id>.toml`). `projection_exists` gates the no-clobber
+/// guard on `projection init`, mirroring `SettingsRepo::is_initialized`.
+pub trait ProjectionRepo {
+    type Error: std::error::Error + Send + Sync + 'static;
+    fn load_projection(&self, spec: &str) -> Result<SystemProjection, Self::Error>;
+    fn save_projection(&self, p: &SystemProjection) -> Result<(), Self::Error>;
+    fn projection_exists(&self, spec: &str) -> bool;
 }
 
 /// Persistence for session records (`sessions/<id>.toml`). `list_sessions` is
