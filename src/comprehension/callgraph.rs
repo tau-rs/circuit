@@ -163,7 +163,10 @@ mod tests {
         let g = CallGraph::build(&decls);
         // ids: run=0, mid=1, leaf=2
         assert_eq!(g.reachable_with_depth(&[0]), vec![(0, 0), (1, 1), (2, 2)]);
-        assert_eq!(g.reverse_reachable_with_depth(&[2]), vec![(0, 2), (1, 1), (2, 0)]);
+        assert_eq!(
+            g.reverse_reachable_with_depth(&[2]),
+            vec![(0, 2), (1, 1), (2, 0)]
+        );
     }
 
     #[test]

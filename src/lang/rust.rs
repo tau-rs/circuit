@@ -62,13 +62,16 @@ fn collect_calls(node: tree_sitter::Node, src: &str, out: &mut Vec<String>) {
     }
 }
 
-/// True for test-marker attributes (`#[test]`, `#[tokio::test]`, …) but not
-/// `#[cfg(test)]`: compares the attribute path's last segment to `test`,
-/// ignoring any `(..)` argument list.
+/// Heuristic test-marker detector: true when the attribute path's last segment
+/// is `test` — so `#[test]`, `#[tokio::test]`, and any other `*::test` — but not
+/// `#[cfg(test)]`. Ignores any `(..)` argument list; not a full attribute parse.
 fn is_test_attr(text: &str) -> bool {
     let inner = text.trim().trim_start_matches("#[").trim_end_matches(']');
     let path = inner.split('(').next().unwrap_or(inner).trim();
-    path.rsplit("::").next().map(|s| s == "test").unwrap_or(false)
+    path.rsplit("::")
+        .next()
+        .map(|s| s == "test")
+        .unwrap_or(false)
 }
 
 /// A function is a test if a preceding attribute (skipping comments) mentions `test`.

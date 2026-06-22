@@ -194,7 +194,11 @@ fn main() -> Result<()> {
     match cli.command {
         Command::Analyze { path } => run_analyze(&path),
         Command::Comprehend { path } => run_comprehend(&path),
-        Command::Impact { target, path, max_depth } => run_impact(&target, &path, max_depth),
+        Command::Impact {
+            target,
+            path,
+            max_depth,
+        } => run_impact(&target, &path, max_depth),
         Command::Init { path } => run_init(&path),
         Command::Spec { command } => run_spec(command),
         Command::Dag { command } => run_dag(command),
