@@ -1527,6 +1527,7 @@ mod tests {
         p.component.push(Component {
             name: "billing".into(),
             layer: Layer::Domain,
+            module: None,
         });
         store.save_projection(&p).unwrap();
 

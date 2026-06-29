@@ -29,6 +29,18 @@ pub struct SystemProjection {
 pub struct Component {
     pub name: String,
     pub layer: Layer,
+    /// Which derived code module realizes this component (top-level module name,
+    /// e.g. "model"). `None` ⇒ join on `name`. The design name and the code
+    /// module live in different namespaces, so the link must be declared.
+    #[serde(default)]
+    pub module: Option<String>,
+}
+
+impl Component {
+    /// The derived-graph module name this component joins to.
+    pub fn effective_module(&self) -> &str {
+        self.module.as_deref().unwrap_or(&self.name)
+    }
 }
 
 /// An intended (allowed) dependency edge. Slice C diffs code edges against these.
@@ -86,14 +98,8 @@ mod tests {
             schema_version: 1,
             spec: "checkout".into(),
             component: vec![
-                Component {
-                    name: "billing".into(),
-                    layer: Layer::Domain,
-                },
-                Component {
-                    name: "gh-adapter".into(),
-                    layer: Layer::Adapter,
-                },
+                Component { name: "billing".into(), layer: Layer::Domain, module: None },
+                Component { name: "gh-adapter".into(), layer: Layer::Adapter, module: None },
             ],
             edge: vec![IntendedEdge {
                 from: "gh-adapter".into(),
@@ -151,5 +157,29 @@ mod tests {
         assert!(p.context.is_empty());
         assert!(p.relationship.is_empty());
         assert!(p.contract.is_empty());
+    }
+
+    #[test]
+    fn effective_module_uses_module_then_falls_back_to_name() {
+        let mapped = Component { name: "billing".into(), layer: Layer::Domain, module: Some("model".into()) };
+        assert_eq!(mapped.effective_module(), "model");
+
+        let unmapped = Component { name: "cart".into(), layer: Layer::Domain, module: None };
+        assert_eq!(unmapped.effective_module(), "cart");
+    }
+
+    #[test]
+    fn component_without_module_key_parses_and_defaults_to_none() {
+        // A Slice A projection has no `module` key on its components.
+        let text = r#"
+            schema_version = 1
+            spec = "checkout"
+            [[component]]
+            name = "billing"
+            layer = "domain"
+        "#;
+        let p: SystemProjection = toml::from_str(text).unwrap();
+        assert_eq!(p.component[0].module, None);
+        assert_eq!(p.component[0].effective_module(), "billing");
     }
 }
