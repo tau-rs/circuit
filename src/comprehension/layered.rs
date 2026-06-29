@@ -131,6 +131,85 @@ pub fn overlay(
     }
 }
 
+/// Deterministic plain-text render: layer columns + edge summary + optional
+/// feature overlay trailer.
+pub fn render_text(g: &ArchGraph, lg: &LayeredGraph, overlay: Option<&FeatureOverlay>) -> String {
+    if let Some(ov) = overlay {
+        if ov.modules.is_empty() {
+            return format!("no function matches '{}'\n", ov.selector);
+        }
+    }
+    let members: BTreeSet<ModuleId> = overlay
+        .map(|o| o.modules.iter().copied().collect())
+        .unwrap_or_default();
+
+    let mut out = String::new();
+    let _ = writeln!(out, "layers (inward →)");
+    for col in &lg.columns {
+        let names: Vec<String> = col
+            .modules
+            .iter()
+            .map(|&id| {
+                let star = if members.contains(&id) { "*" } else { "" };
+                format!("{}{}", g.name(id), star)
+            })
+            .collect();
+        let body = if names.is_empty() {
+            "(none)".to_string()
+        } else {
+            names.join("  ")
+        };
+        let _ = writeln!(out, "  [{:<11}] {}", format!("{:?}", col.layer), body);
+    }
+
+    let (mut inward, mut outward, mut lateral, mut unranked) = (0u32, 0u32, 0u32, 0u32);
+    for e in &lg.edges {
+        match e.dir {
+            EdgeDir::Inward => inward += 1,
+            EdgeDir::Outward => outward += 1,
+            EdgeDir::Lateral => lateral += 1,
+            EdgeDir::Unranked => unranked += 1,
+        }
+    }
+    let _ = writeln!(
+        out,
+        "edges: {}  (inward {} · lateral {} · outward/violation {} · unranked {})",
+        lg.edges.len(),
+        inward,
+        lateral,
+        outward,
+        unranked
+    );
+    for e in &lg.edges {
+        if matches!(e.dir, EdgeDir::Outward) {
+            let _ = writeln!(
+                out,
+                "  ⚠ {} → {}  (outward — dependency-rule violation)",
+                g.name(e.from),
+                g.name(e.to)
+            );
+        }
+    }
+
+    if let Some(ov) = overlay {
+        let crossed: Vec<String> = lg
+            .columns
+            .iter()
+            .filter(|c| c.modules.iter().any(|id| members.contains(id)))
+            .map(|c| format!("{:?}", c.layer))
+            .collect();
+        let _ = writeln!(
+            out,
+            "feature · {} — spans {} modules, {} induced edges; crosses {}",
+            ov.selector,
+            ov.modules.len(),
+            ov.edges.len(),
+            crossed.join(" → ")
+        );
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -267,5 +346,38 @@ mod tests {
         let mut names: Vec<&str> = ov.modules.iter().map(|&id| g.name(id)).collect();
         names.sort();
         assert_eq!(names, vec!["x", "y"]);
+    }
+
+    #[test]
+    fn render_lists_columns_and_edge_summary() {
+        let lg = layered(&fixture());
+        let g = fixture();
+        let out = render_text(&g, &lg, None);
+        assert!(out.contains("layers (inward →)"));
+        assert!(out.contains("[Adapter"));
+        assert!(out.contains("adapters"));
+        assert!(out.contains("edges:"));
+        // domain -> adapters is an outward violation in the fixture.
+        assert!(out.contains("⚠ domain → adapters"));
+    }
+
+    #[test]
+    fn render_marks_feature_members_and_trailer() {
+        let (g, calls) = overlay_fixture();
+        let lg = layered(&g);
+        let ov = overlay(&g, &calls, "main", &lg);
+        let out = render_text(&g, &lg, Some(&ov));
+        assert!(out.contains("app*"));
+        assert!(out.contains("feature · main"));
+        assert!(out.contains("spans 3 modules"));
+    }
+
+    #[test]
+    fn render_no_match_notice() {
+        let (g, calls) = overlay_fixture();
+        let lg = layered(&g);
+        let ov = overlay(&g, &calls, "nope", &lg);
+        let out = render_text(&g, &lg, Some(&ov));
+        assert_eq!(out, "no function matches 'nope'\n");
     }
 }
