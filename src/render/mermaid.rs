@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
-use crate::graph::ArchGraph;
+use crate::comprehension::layered::{EdgeDir, FeatureOverlay, LayeredGraph};
+use crate::graph::{ArchGraph, ModuleId};
 use crate::indicators::dependency_rule::Violation;
 
 fn node_id(name: &str) -> String {
@@ -58,6 +59,55 @@ pub fn render(graph: &ArchGraph, violations: &[Violation], cycles: &[Vec<String>
     out
 }
 
+/// Render the layered graph as a mermaid `flowchart LR`: one subgraph per
+/// non-empty layer column, outward edges flagged `|VIOLATION|`, and (when an
+/// overlay is given) its modules bolded via a `feat` class. Export only.
+pub fn render_layered(
+    g: &ArchGraph,
+    lg: &LayeredGraph,
+    overlay: Option<&FeatureOverlay>,
+) -> String {
+    let members: HashSet<ModuleId> = overlay
+        .map(|o| o.modules.iter().copied().collect())
+        .unwrap_or_default();
+
+    let mut out = String::from("flowchart LR\n");
+    for col in &lg.columns {
+        if col.modules.is_empty() {
+            continue;
+        }
+        out.push_str(&format!("  subgraph {:?}\n", col.layer));
+        for &id in &col.modules {
+            out.push_str(&format!(
+                "    {}[\"{}\"]\n",
+                node_id(g.name(id)),
+                g.name(id)
+            ));
+        }
+        out.push_str("  end\n");
+    }
+    for e in &lg.edges {
+        let arrow = if matches!(e.dir, EdgeDir::Outward) {
+            "-->|VIOLATION|"
+        } else {
+            "-->"
+        };
+        out.push_str(&format!(
+            "  {} {} {}\n",
+            node_id(g.name(e.from)),
+            arrow,
+            node_id(g.name(e.to))
+        ));
+    }
+    if !members.is_empty() {
+        let mut ids: Vec<String> = members.iter().map(|&id| node_id(g.name(id))).collect();
+        ids.sort();
+        out.push_str("  classDef feat stroke-width:3px,font-weight:bold;\n");
+        out.push_str(&format!("  class {} feat;\n", ids.join(",")));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -94,5 +144,50 @@ mod tests {
         let out = render(&g, &violations, &cycles);
         assert!(out.contains("domain -->|VIOLATION| adapters"));
         assert!(out.contains("(Domain) ⟲"));
+    }
+
+    #[test]
+    fn layered_render_has_subgraph_per_nonempty_layer() {
+        use crate::comprehension::layered::layered;
+        let mut g = ArchGraph::new();
+        let a = g.ensure_module("adapters");
+        let d = g.ensure_module("domain");
+        g.add_edge(a, d);
+        let lg = layered(&g);
+
+        let out = render_layered(&g, &lg, None);
+        assert!(out.starts_with("flowchart LR\n"));
+        assert!(out.contains("subgraph Adapter"));
+        assert!(out.contains("subgraph Domain"));
+        // Empty Application column is omitted.
+        assert!(!out.contains("subgraph Application"));
+        assert!(out.contains("adapters --> domain"));
+    }
+
+    #[test]
+    fn layered_render_bolds_overlay_members() {
+        use crate::comprehension::callgraph::CallGraph;
+        use crate::comprehension::layered::{layered, overlay};
+        use crate::lang::FnDecl;
+
+        let mut g = ArchGraph::new();
+        g.ensure_module("app");
+        let lg = layered(&g);
+        let decls = vec![(
+            "app".to_string(),
+            FnDecl {
+                name: "run".into(),
+                is_pub: true,
+                is_test: false,
+                is_main: false,
+                calls: vec![],
+            },
+        )];
+        let calls = CallGraph::build(&decls);
+        let ov = overlay(&g, &calls, "run", &lg);
+
+        let out = render_layered(&g, &lg, Some(&ov));
+        assert!(out.contains("classDef feat"));
+        assert!(out.contains("class app feat;"));
     }
 }

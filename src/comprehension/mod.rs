@@ -1,5 +1,6 @@
 pub mod callgraph;
 pub mod impact;
+pub mod layered;
 pub mod scan;
 
 use std::fmt::Write;

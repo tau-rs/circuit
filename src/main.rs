@@ -41,6 +41,17 @@ enum Command {
         #[arg(long)]
         max_depth: Option<u32>,
     },
+    /// Layered architecture map: layer columns + feature overlay (no LLM)
+    Map {
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Highlight a feature's induced subgraph (function name or `module::name`)
+        #[arg(long)]
+        feature: Option<String>,
+        /// Emit mermaid export instead of text
+        #[arg(long)]
+        mermaid: bool,
+    },
     /// Scaffold the `.circuit/` authored data model in the current repo
     Init {
         #[arg(default_value = ".")]
@@ -222,6 +233,11 @@ fn main() -> Result<()> {
             path,
             max_depth,
         } => run_impact(&target, &path, max_depth),
+        Command::Map {
+            path,
+            feature,
+            mermaid,
+        } => run_map(&path, feature.as_deref(), mermaid),
         Command::Init { path } => run_init(&path),
         Command::Spec { command } => run_spec(command),
         Command::Dag { command } => run_dag(command),
@@ -244,6 +260,11 @@ fn run_comprehend(path: &Path) -> Result<()> {
 
 fn run_impact(target: &str, path: &Path, max_depth: Option<u32>) -> Result<()> {
     println!("{}", circuit::app::impact(path, target, max_depth)?);
+    Ok(())
+}
+
+fn run_map(path: &Path, feature: Option<&str>, mermaid: bool) -> Result<()> {
+    println!("{}", circuit::app::map(path, feature, mermaid)?);
     Ok(())
 }
 
