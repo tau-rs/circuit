@@ -2,6 +2,7 @@ pub mod config;
 pub mod glossary;
 pub mod local;
 pub mod node;
+pub mod projection;
 pub mod spec;
 
 use std::path::Path;
