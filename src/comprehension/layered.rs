@@ -1,5 +1,7 @@
+use std::collections::BTreeSet;
 use std::fmt::Write;
 
+use crate::comprehension::callgraph::CallGraph;
 use crate::graph::{ArchGraph, ModuleId};
 use crate::layer::{rank, Layer};
 
@@ -79,9 +81,61 @@ pub fn layered(g: &ArchGraph) -> LayeredGraph {
     LayeredGraph { columns, edges }
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct FeatureOverlay {
+    /// Raw selector the user passed.
+    pub selector: String,
+    /// Modules the feature's call-reachable functions live in (sorted by id, deduped).
+    pub modules: Vec<ModuleId>,
+    /// Indices into `LayeredGraph.edges` whose endpoints are both in `modules`.
+    pub edges: Vec<usize>,
+}
+
+/// Resolve `target` like `impact` (bare name OR `module::name`, union all
+/// matches), collect the modules of every call-reachable function, and induce
+/// the subgraph edges among them. Empty `modules` means nothing matched.
+pub fn overlay(
+    g: &ArchGraph,
+    calls: &CallGraph,
+    target: &str,
+    lg: &LayeredGraph,
+) -> FeatureOverlay {
+    let mut starts: Vec<usize> = Vec::new();
+    for (id, node) in calls.nodes().iter().enumerate() {
+        if node.name == target || node.qualified() == target {
+            starts.push(id);
+        }
+    }
+
+    let mut modset: BTreeSet<ModuleId> = BTreeSet::new();
+    for &s in &starts {
+        for fid in calls.reachable(s) {
+            if let Some(mid) = g.module_id(&calls.node(fid).module) {
+                modset.insert(mid);
+            }
+        }
+    }
+
+    let edges: Vec<usize> = lg
+        .edges
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| modset.contains(&e.from) && modset.contains(&e.to))
+        .map(|(i, _)| i)
+        .collect();
+
+    FeatureOverlay {
+        selector: target.to_string(),
+        modules: modset.into_iter().collect(),
+        edges,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::comprehension::callgraph::CallGraph;
+    use crate::lang::FnDecl;
 
     /// adapters → app → domain (all inward), plus a domain → adapters violation.
     fn fixture() -> ArchGraph {
@@ -95,6 +149,33 @@ mod tests {
         g.add_edge(domain, adapters); // outward (1 -> 3) = violation
         g.add_edge(adapters, widgets); // unranked (Adapter -> Unknown)
         g
+    }
+
+    fn fn_decl(name: &str, calls: &[&str]) -> FnDecl {
+        FnDecl {
+            name: name.into(),
+            is_pub: false,
+            is_test: false,
+            is_main: name == "main",
+            calls: calls.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    /// Graph + matching call data: app::run -> domain::work; adapters::main -> app::run.
+    fn overlay_fixture() -> (ArchGraph, CallGraph) {
+        let mut g = ArchGraph::new();
+        let adapters = g.ensure_module("adapters");
+        let app = g.ensure_module("app");
+        let domain = g.ensure_module("domain");
+        g.add_edge(adapters, app);
+        g.add_edge(app, domain);
+
+        let decls = vec![
+            ("adapters".to_string(), fn_decl("main", &["run"])),
+            ("app".to_string(), fn_decl("run", &["work"])),
+            ("domain".to_string(), fn_decl("work", &[])),
+        ];
+        (g, CallGraph::build(&decls))
     }
 
     #[test]
@@ -146,5 +227,45 @@ mod tests {
         g.add_edge(a, r);
         let lg = layered(&g);
         assert_eq!(lg.edges[0].dir, EdgeDir::Lateral);
+    }
+
+    #[test]
+    fn overlay_collects_reachable_modules_and_induced_edges() {
+        let (g, calls) = overlay_fixture();
+        let lg = layered(&g);
+        let ov = overlay(&g, &calls, "main", &lg);
+
+        let mut names: Vec<&str> = ov.modules.iter().map(|&id| g.name(id)).collect();
+        names.sort();
+        assert_eq!(names, vec!["adapters", "app", "domain"]);
+        // Both edges (adapters->app, app->domain) are induced.
+        assert_eq!(ov.edges.len(), 2);
+        assert_eq!(ov.selector, "main");
+    }
+
+    #[test]
+    fn overlay_no_match_is_empty() {
+        let (g, calls) = overlay_fixture();
+        let lg = layered(&g);
+        let ov = overlay(&g, &calls, "nope", &lg);
+        assert!(ov.modules.is_empty());
+        assert!(ov.edges.is_empty());
+    }
+
+    #[test]
+    fn overlay_unions_multiple_matches() {
+        let mut g = ArchGraph::new();
+        g.ensure_module("x");
+        g.ensure_module("y");
+        let decls = vec![
+            ("x".to_string(), fn_decl("build", &[])),
+            ("y".to_string(), fn_decl("build", &[])),
+        ];
+        let calls = CallGraph::build(&decls);
+        let lg = layered(&g);
+        let ov = overlay(&g, &calls, "build", &lg);
+        let mut names: Vec<&str> = ov.modules.iter().map(|&id| g.name(id)).collect();
+        names.sort();
+        assert_eq!(names, vec!["x", "y"]);
     }
 }
