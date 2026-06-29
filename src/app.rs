@@ -87,9 +87,9 @@ pub fn projection_show<S: SettingsRepo, P: ProjectionRepo>(
     spec: &str,
 ) -> anyhow::Result<String> {
     require_initialized(settings)?;
-    let p = projections
-        .load_projection(spec)
-        .with_context(|| format!("no projection for {spec} — run `circuit projection init {spec}`"))?;
+    let p = projections.load_projection(spec).with_context(|| {
+        format!("no projection for {spec} — run `circuit projection init {spec}`")
+    })?;
     Ok(render_projection(&p))
 }
 
@@ -135,7 +135,13 @@ fn render_projection(p: &SystemProjection) -> String {
         let _ = writeln!(out, "  (none)");
     }
     for c in &p.contract {
-        let _ = writeln!(out, "  - {} [{}] -> {}", c.name, c.provider, c.consumers.join(", "));
+        let _ = writeln!(
+            out,
+            "  - {} [{}] -> {}",
+            c.name,
+            c.provider,
+            c.consumers.join(", ")
+        );
     }
 
     out
@@ -1400,11 +1406,14 @@ mod tests {
     }
 
     fn store_with_spec(id: &str) -> MemStore {
-        let store = MemStore { initialized: true, ..Default::default() };
-        store
-            .specs
-            .borrow_mut()
-            .insert(id.into(), crate::model::spec::SpecRecord::new(id, "T", "intent"));
+        let store = MemStore {
+            initialized: true,
+            ..Default::default()
+        };
+        store.specs.borrow_mut().insert(
+            id.into(),
+            crate::model::spec::SpecRecord::new(id, "T", "intent"),
+        );
         store
     }
 
@@ -1417,7 +1426,10 @@ mod tests {
 
     #[test]
     fn projection_init_requires_the_spec_to_exist() {
-        let store = MemStore { initialized: true, ..Default::default() };
+        let store = MemStore {
+            initialized: true,
+            ..Default::default()
+        };
         let err = projection_init(&store, &store, &store, "checkout").unwrap_err();
         assert!(err.to_string().contains("no spec 'checkout'"), "got: {err}");
     }
@@ -1436,7 +1448,10 @@ mod tests {
         use crate::model::projection::{Component, SystemProjection};
         let store = store_with_spec("checkout");
         let mut p = SystemProjection::new("checkout");
-        p.component.push(Component { name: "billing".into(), layer: Layer::Domain });
+        p.component.push(Component {
+            name: "billing".into(),
+            layer: Layer::Domain,
+        });
         store.save_projection(&p).unwrap();
 
         let out = projection_show(&store, &store, "checkout").unwrap();
@@ -1448,7 +1463,9 @@ mod tests {
     #[test]
     fn projection_show_renders_empty_sections_as_none() {
         let store = store_with_spec("checkout");
-        store.save_projection(&crate::model::projection::SystemProjection::new("checkout")).unwrap();
+        store
+            .save_projection(&crate::model::projection::SystemProjection::new("checkout"))
+            .unwrap();
         let out = projection_show(&store, &store, "checkout").unwrap();
         assert!(out.contains("Components (0)"), "got: {out}");
         assert!(out.contains("(none)"), "got: {out}");
@@ -1458,7 +1475,10 @@ mod tests {
     fn projection_show_bails_when_absent() {
         let store = store_with_spec("checkout");
         let err = projection_show(&store, &store, "checkout").unwrap_err();
-        assert!(err.to_string().contains("no projection for checkout"), "got: {err}");
+        assert!(
+            err.to_string().contains("no projection for checkout"),
+            "got: {err}"
+        );
     }
 }
 
@@ -1473,7 +1493,9 @@ pub(crate) mod fakes {
     use crate::model::node::DagNode;
     use crate::model::projection::SystemProjection;
     use crate::model::spec::SpecRecord;
-    use crate::ports::{DagRepo, DeliveryProbe, ProjectionRepo, SessionRepo, SettingsRepo, SpecRepo};
+    use crate::ports::{
+        DagRepo, DeliveryProbe, ProjectionRepo, SessionRepo, SettingsRepo, SpecRepo,
+    };
     use crate::session::SessionRecord;
 
     #[derive(Debug)]

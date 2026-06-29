@@ -86,13 +86,26 @@ mod tests {
             schema_version: 1,
             spec: "checkout".into(),
             component: vec![
-                Component { name: "billing".into(), layer: Layer::Domain },
-                Component { name: "gh-adapter".into(), layer: Layer::Adapter },
+                Component {
+                    name: "billing".into(),
+                    layer: Layer::Domain,
+                },
+                Component {
+                    name: "gh-adapter".into(),
+                    layer: Layer::Adapter,
+                },
             ],
-            edge: vec![IntendedEdge { from: "gh-adapter".into(), to: "billing".into() }],
+            edge: vec![IntendedEdge {
+                from: "gh-adapter".into(),
+                to: "billing".into(),
+            }],
             context: vec![
-                Context { name: "checkout".into() },
-                Context { name: "payments".into() },
+                Context {
+                    name: "checkout".into(),
+                },
+                Context {
+                    name: "payments".into(),
+                },
             ],
             relationship: vec![Relationship {
                 upstream: "payments".into(),

@@ -356,15 +356,18 @@ mod tests {
 
     #[test]
     fn projection_round_trips_through_disk_and_exists_flips() {
-        use crate::model::projection::{Component, SystemProjection};
         use crate::layer::Layer;
+        use crate::model::projection::{Component, SystemProjection};
         let dir = tempfile::tempdir().unwrap();
         let ws = Workspace::new(dir.path());
 
         assert!(!ws.projection_exists("checkout"));
 
         let mut p = SystemProjection::new("checkout");
-        p.component.push(Component { name: "billing".into(), layer: Layer::Domain });
+        p.component.push(Component {
+            name: "billing".into(),
+            layer: Layer::Domain,
+        });
         ws.save_projection(&p).unwrap();
 
         assert!(ws.projection_exists("checkout"));

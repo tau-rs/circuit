@@ -65,10 +65,7 @@ mod tests {
             (Layer::Unknown, "unknown"),
         ] {
             let text = toml::to_string(&Wrap { layer: variant }).unwrap();
-            assert!(
-                text.contains(&format!("layer = \"{name}\"")),
-                "got: {text}"
-            );
+            assert!(text.contains(&format!("layer = \"{name}\"")), "got: {text}");
             let back: Wrap = toml::from_str(&text).unwrap();
             assert_eq!(back.layer, variant);
         }
