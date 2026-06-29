@@ -24,7 +24,8 @@ pub struct SystemProjection {
 }
 
 /// An intended module/component and the layer it is meant to live in. `layer`
-/// reuses M1's `Layer` so slice C can diff projected layers against derived ones.
+/// reuses M1's `Layer`; a future slice may diff projected layers against derived
+/// ones (Slice C's conformance check diffs the `edge` allowlist, not layers).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Component {
     pub name: String,
@@ -98,8 +99,16 @@ mod tests {
             schema_version: 1,
             spec: "checkout".into(),
             component: vec![
-                Component { name: "billing".into(), layer: Layer::Domain, module: None },
-                Component { name: "gh-adapter".into(), layer: Layer::Adapter, module: None },
+                Component {
+                    name: "billing".into(),
+                    layer: Layer::Domain,
+                    module: None,
+                },
+                Component {
+                    name: "gh-adapter".into(),
+                    layer: Layer::Adapter,
+                    module: None,
+                },
             ],
             edge: vec![IntendedEdge {
                 from: "gh-adapter".into(),
@@ -161,10 +170,18 @@ mod tests {
 
     #[test]
     fn effective_module_uses_module_then_falls_back_to_name() {
-        let mapped = Component { name: "billing".into(), layer: Layer::Domain, module: Some("model".into()) };
+        let mapped = Component {
+            name: "billing".into(),
+            layer: Layer::Domain,
+            module: Some("model".into()),
+        };
         assert_eq!(mapped.effective_module(), "model");
 
-        let unmapped = Component { name: "cart".into(), layer: Layer::Domain, module: None };
+        let unmapped = Component {
+            name: "cart".into(),
+            layer: Layer::Domain,
+            module: None,
+        };
         assert_eq!(unmapped.effective_module(), "cart");
     }
 
