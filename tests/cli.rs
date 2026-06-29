@@ -3,6 +3,68 @@ use predicates::prelude::*;
 use tempfile::tempdir;
 
 #[test]
+fn map_reports_layers() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src");
+    std::fs::create_dir_all(src.join("app")).unwrap();
+    std::fs::write(
+        src.join("main.rs"),
+        "use crate::app::run;\nfn main() { run(); }",
+    )
+    .unwrap();
+    std::fs::write(src.join("app/mod.rs"), "pub fn run() {}").unwrap();
+
+    Command::cargo_bin("circuit")
+        .unwrap()
+        .arg("map")
+        .arg(dir.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("layers (inward →)"))
+        .stdout(predicate::str::contains("[Application"));
+}
+
+#[test]
+fn map_feature_highlights_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src");
+    std::fs::create_dir_all(src.join("app")).unwrap();
+    std::fs::write(
+        src.join("main.rs"),
+        "use crate::app::run;\nfn main() { run(); }",
+    )
+    .unwrap();
+    std::fs::write(src.join("app/mod.rs"), "pub fn run() {}").unwrap();
+
+    Command::cargo_bin("circuit")
+        .unwrap()
+        .arg("map")
+        .arg(dir.path())
+        .arg("--feature")
+        .arg("main")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("feature · main"));
+}
+
+#[test]
+fn map_mermaid_exports_flowchart() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(src.join("main.rs"), "fn main() {}").unwrap();
+
+    Command::cargo_bin("circuit")
+        .unwrap()
+        .arg("map")
+        .arg(dir.path())
+        .arg("--mermaid")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("flowchart LR"));
+}
+
+#[test]
 fn analyze_reports_indicators_and_mermaid() {
     let dir = tempfile::tempdir().unwrap();
     let src = dir.path().join("src");

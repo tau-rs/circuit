@@ -78,7 +78,11 @@ pub fn render_layered(
         }
         out.push_str(&format!("  subgraph {:?}\n", col.layer));
         for &id in &col.modules {
-            out.push_str(&format!("    {}[\"{}\"]\n", node_id(g.name(id)), g.name(id)));
+            out.push_str(&format!(
+                "    {}[\"{}\"]\n",
+                node_id(g.name(id)),
+                g.name(id)
+            ));
         }
         out.push_str("  end\n");
     }

@@ -263,20 +263,17 @@ mod tests {
         let order: Vec<Layer> = lg.columns.iter().map(|c| c.layer).collect();
         assert_eq!(
             order,
-            vec![Layer::Adapter, Layer::Application, Layer::Domain, Layer::Unknown]
+            vec![
+                Layer::Adapter,
+                Layer::Application,
+                Layer::Domain,
+                Layer::Unknown
+            ]
         );
         let g = fixture();
-        let adapter_names: Vec<&str> = lg.columns[0]
-            .modules
-            .iter()
-            .map(|&id| g.name(id))
-            .collect();
+        let adapter_names: Vec<&str> = lg.columns[0].modules.iter().map(|&id| g.name(id)).collect();
         assert_eq!(adapter_names, vec!["adapters"]);
-        let unknown_names: Vec<&str> = lg.columns[3]
-            .modules
-            .iter()
-            .map(|&id| g.name(id))
-            .collect();
+        let unknown_names: Vec<&str> = lg.columns[3].modules.iter().map(|&id| g.name(id)).collect();
         assert_eq!(unknown_names, vec!["widgets"]);
     }
 

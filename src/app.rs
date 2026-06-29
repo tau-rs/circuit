@@ -752,6 +752,36 @@ pub fn comprehend(path: &std::path::Path) -> anyhow::Result<String> {
     Ok(crate::comprehension::render_text(&result))
 }
 
+/// Layered architecture map: layer columns + classified edges, with an optional
+/// `--feature` induced-subgraph overlay. Mermaid is an export format only.
+pub fn map(path: &std::path::Path, feature: Option<&str>, mermaid: bool) -> anyhow::Result<String> {
+    let graph = crate::builder::build_graph(path)?;
+    let lg = crate::comprehension::layered::layered(&graph);
+    let overlay = match feature {
+        Some(f) => {
+            let decls = crate::comprehension::scan::scan_functions(path)?;
+            let calls = crate::comprehension::callgraph::CallGraph::build(&decls);
+            Some(crate::comprehension::layered::overlay(
+                &graph, &calls, f, &lg,
+            ))
+        }
+        None => None,
+    };
+    if mermaid {
+        Ok(crate::render::mermaid::render_layered(
+            &graph,
+            &lg,
+            overlay.as_ref(),
+        ))
+    } else {
+        Ok(crate::comprehension::layered::render_text(
+            &graph,
+            &lg,
+            overlay.as_ref(),
+        ))
+    }
+}
+
 /// Structural impact / blast radius (deterministic, no LLM): the dependents
 /// and dependencies cones of a target function, ranked by hop distance.
 pub fn impact(
@@ -919,6 +949,19 @@ mod tests {
             gh: true,
             remote: true,
         }
+    }
+
+    #[test]
+    fn map_self_emits_layer_columns() {
+        let out = map(std::path::Path::new("."), None, false).unwrap();
+        assert!(out.contains("layers (inward →)"));
+        assert!(out.contains("edges:"));
+    }
+
+    #[test]
+    fn map_mermaid_emits_flowchart() {
+        let out = map(std::path::Path::new("."), None, true).unwrap();
+        assert!(out.starts_with("flowchart LR\n"));
     }
 
     #[test]
