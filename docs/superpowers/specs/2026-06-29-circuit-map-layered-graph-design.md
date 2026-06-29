@@ -92,7 +92,7 @@ pub struct FeatureOverlay {
     pub edges: Vec<usize>,           // indices into LayeredGraph.edges, both endpoints in `modules`
 }
 
-pub fn overlay(g: &ArchGraph, calls: &CallGraph, target: &str) -> FeatureOverlay;
+pub fn overlay(g: &ArchGraph, calls: &CallGraph, target: &str, lg: &LayeredGraph) -> FeatureOverlay;
 ```
 
 - Resolve `target` **exactly like `impact`**: match `node.name == target || node.qualified() == target`;
