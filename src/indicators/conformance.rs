@@ -99,7 +99,6 @@ pub fn check(graph: &ArchGraph, proj: &SystemProjection) -> Conformance {
         .map(|c| c.name.clone())
         .collect();
     uncovered.sort();
-    uncovered.dedup();
 
     Conformance { violations, uncovered }
 }
@@ -189,5 +188,22 @@ mod tests {
         // billing(model) and ghx(adapters) are both present as graph nodes -> covered
         assert!(c.uncovered.is_empty());
         assert_eq!(c.health(), Health::Sound);
+    }
+
+    #[test]
+    fn tie_break_uses_first_component_by_sorted_name() {
+        // Two components "zeta" and "alpha" both map to module "model".
+        // A forbidden edge model->adapters must name the alphabetically-first
+        // component ("alpha") as `from`.
+        let p = proj(
+            &[("zeta", "model"), ("alpha", "model"), ("ghx", "adapters")],
+            &[], // no allowed edges
+        );
+        let g = graph(&[("model", "adapters")]);
+        let c = check(&g, &p);
+        assert_eq!(c.violations.len(), 1, "got: {:?}", c.violations);
+        assert_eq!(c.violations[0].from, "alpha");
+        assert_eq!(c.violations[0].from_module, "model");
+        assert_eq!(c.violations[0].to, "ghx");
     }
 }
