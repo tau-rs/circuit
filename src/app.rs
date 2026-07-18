@@ -1605,8 +1605,8 @@ mod tests {
     #[test]
     fn conformance_reports_a_broken_edge_and_renders_it() {
         use crate::adapters::store::Workspace;
-        use crate::model::projection::{Component, SystemProjection};
         use crate::layer::Layer;
+        use crate::model::projection::{Component, SystemProjection};
 
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
@@ -1618,16 +1618,28 @@ mod tests {
         std::fs::write(src.join("adapters/y.rs"), "pub struct Thing;").unwrap();
 
         let ws = Workspace::new(root);
-        ws.save_config(&crate::model::config::Config::default()).unwrap();
+        ws.save_config(&crate::model::config::Config::default())
+            .unwrap();
 
         // projection: billing(model), ghx(adapters); allowed ghx->billing (adapters->model).
         // code has model->adapters, which is NOT allowed -> 1 violation.
         let mut p = SystemProjection::new("checkout");
         p.component = vec![
-            Component { name: "billing".into(), layer: Layer::Domain, module: Some("model".into()) },
-            Component { name: "ghx".into(), layer: Layer::Adapter, module: Some("adapters".into()) },
+            Component {
+                name: "billing".into(),
+                layer: Layer::Domain,
+                module: Some("model".into()),
+            },
+            Component {
+                name: "ghx".into(),
+                layer: Layer::Adapter,
+                module: Some("adapters".into()),
+            },
         ];
-        p.edge = vec![crate::model::projection::IntendedEdge { from: "ghx".into(), to: "billing".into() }];
+        p.edge = vec![crate::model::projection::IntendedEdge {
+            from: "ghx".into(),
+            to: "billing".into(),
+        }];
         ws.save_projection(&p).unwrap();
 
         let c = conformance(&ws, &ws, "checkout", root).unwrap();
@@ -1643,9 +1655,13 @@ mod tests {
         use crate::adapters::store::Workspace;
         let dir = tempfile::tempdir().unwrap();
         let ws = Workspace::new(dir.path());
-        ws.save_config(&crate::model::config::Config::default()).unwrap();
+        ws.save_config(&crate::model::config::Config::default())
+            .unwrap();
         let err = conformance(&ws, &ws, "checkout", dir.path()).unwrap_err();
-        assert!(err.to_string().contains("no projection for checkout"), "got: {err}");
+        assert!(
+            err.to_string().contains("no projection for checkout"),
+            "got: {err}"
+        );
     }
 }
 

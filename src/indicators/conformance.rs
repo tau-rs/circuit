@@ -100,7 +100,10 @@ pub fn check(graph: &ArchGraph, proj: &SystemProjection) -> Conformance {
         .collect();
     uncovered.sort();
 
-    Conformance { violations, uncovered }
+    Conformance {
+        violations,
+        uncovered,
+    }
 }
 
 #[cfg(test)]
@@ -122,7 +125,10 @@ mod tests {
             .collect();
         p.edge = edges
             .iter()
-            .map(|(f, t)| IntendedEdge { from: (*f).into(), to: (*t).into() })
+            .map(|(f, t)| IntendedEdge {
+                from: (*f).into(),
+                to: (*t).into(),
+            })
             .collect();
         p
     }
@@ -140,7 +146,10 @@ mod tests {
 
     #[test]
     fn allowed_edge_is_not_a_violation() {
-        let p = proj(&[("billing", "model"), ("ghx", "adapters")], &[("ghx", "billing")]);
+        let p = proj(
+            &[("billing", "model"), ("ghx", "adapters")],
+            &[("ghx", "billing")],
+        );
         let g = graph(&[("adapters", "model")]); // ghx->billing == adapters->model, allowed
         let c = check(&g, &p);
         assert!(c.violations.is_empty(), "got: {:?}", c.violations);
@@ -150,7 +159,10 @@ mod tests {
 
     #[test]
     fn forbidden_edge_between_declared_components_is_a_violation() {
-        let p = proj(&[("billing", "model"), ("ghx", "adapters")], &[("ghx", "billing")]);
+        let p = proj(
+            &[("billing", "model"), ("ghx", "adapters")],
+            &[("ghx", "billing")],
+        );
         let g = graph(&[("model", "adapters")]); // billing->ghx, NOT allowed
         let c = check(&g, &p);
         assert_eq!(c.violations.len(), 1, "got: {:?}", c.violations);
@@ -181,7 +193,10 @@ mod tests {
 
     #[test]
     fn projected_edge_absent_from_code_is_silent() {
-        let p = proj(&[("billing", "model"), ("ghx", "adapters")], &[("ghx", "billing")]);
+        let p = proj(
+            &[("billing", "model"), ("ghx", "adapters")],
+            &[("ghx", "billing")],
+        );
         let g = graph(&[("adapters", "model")]); // only the allowed edge exists
         let c = check(&g, &p);
         assert!(c.violations.is_empty());
