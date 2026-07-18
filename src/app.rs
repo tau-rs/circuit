@@ -13,6 +13,7 @@ use crate::flow::delivery::{self, DeliveryMode};
 use crate::flow::facts::{DeliveryFacts, ReviewState};
 use crate::flow::rail::render_rail;
 use crate::flow::stage::derive_stage;
+use crate::indicators::conformance::{check as check_conformance, Conformance};
 use crate::model::config::Config;
 use crate::model::glossary::Glossary;
 use crate::model::local::resolve_worktree_dir;
@@ -91,6 +92,49 @@ pub fn projection_show<S: SettingsRepo, P: ProjectionRepo>(
         format!("no projection for {spec} — run `circuit projection init {spec}`")
     })?;
     Ok(render_projection(&p))
+}
+
+/// Compute system-projection conformance for a spec against a repo worktree.
+pub fn conformance<S: SettingsRepo, P: ProjectionRepo>(
+    settings: &S,
+    projections: &P,
+    spec: &str,
+    path: &Path,
+) -> anyhow::Result<Conformance> {
+    require_initialized(settings)?;
+    let proj = projections.load_projection(spec).with_context(|| {
+        format!("no projection for {spec} — run `circuit projection init {spec}`")
+    })?;
+    let graph = crate::builder::build_graph(path)?;
+    Ok(check_conformance(&graph, &proj))
+}
+
+/// Plain-text report of a conformance result. Empty sections render `(none)`.
+pub fn render_conformance(c: &Conformance) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "Projection conformance: {:?}", c.health());
+
+    let _ = writeln!(out, "Violations ({}):", c.violations.len());
+    if c.violations.is_empty() {
+        let _ = writeln!(out, "  (none)");
+    }
+    for v in &c.violations {
+        let _ = writeln!(
+            out,
+            "  - {} [{}] -> {} [{}]  (not in allowed edges)",
+            v.from, v.from_module, v.to, v.to_module
+        );
+    }
+
+    let _ = writeln!(out, "Uncovered ({}):", c.uncovered.len());
+    if c.uncovered.is_empty() {
+        let _ = writeln!(out, "  (none)");
+    }
+    for u in &c.uncovered {
+        let _ = writeln!(out, "  - {}", u);
+    }
+
+    out
 }
 
 /// Pure text renderer for a system projection. Empty sections render `(none)`.
@@ -1527,6 +1571,7 @@ mod tests {
         p.component.push(Component {
             name: "billing".into(),
             layer: Layer::Domain,
+            module: None,
         });
         store.save_projection(&p).unwrap();
 
@@ -1551,6 +1596,68 @@ mod tests {
     fn projection_show_bails_when_absent() {
         let store = store_with_spec("checkout");
         let err = projection_show(&store, &store, "checkout").unwrap_err();
+        assert!(
+            err.to_string().contains("no projection for checkout"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn conformance_reports_a_broken_edge_and_renders_it() {
+        use crate::adapters::store::Workspace;
+        use crate::layer::Layer;
+        use crate::model::projection::{Component, SystemProjection};
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        // a tiny repo: module `model` depends on module `adapters`
+        let src = root.join("src");
+        std::fs::create_dir_all(src.join("model")).unwrap();
+        std::fs::create_dir_all(src.join("adapters")).unwrap();
+        std::fs::write(src.join("model/x.rs"), "use crate::adapters::Thing;").unwrap();
+        std::fs::write(src.join("adapters/y.rs"), "pub struct Thing;").unwrap();
+
+        let ws = Workspace::new(root);
+        ws.save_config(&crate::model::config::Config::default())
+            .unwrap();
+
+        // projection: billing(model), ghx(adapters); allowed ghx->billing (adapters->model).
+        // code has model->adapters, which is NOT allowed -> 1 violation.
+        let mut p = SystemProjection::new("checkout");
+        p.component = vec![
+            Component {
+                name: "billing".into(),
+                layer: Layer::Domain,
+                module: Some("model".into()),
+            },
+            Component {
+                name: "ghx".into(),
+                layer: Layer::Adapter,
+                module: Some("adapters".into()),
+            },
+        ];
+        p.edge = vec![crate::model::projection::IntendedEdge {
+            from: "ghx".into(),
+            to: "billing".into(),
+        }];
+        ws.save_projection(&p).unwrap();
+
+        let c = conformance(&ws, &ws, "checkout", root).unwrap();
+        assert_eq!(c.violations.len(), 1, "got: {:?}", c.violations);
+
+        let out = render_conformance(&c);
+        assert!(out.contains("Violations (1)"), "got: {out}");
+        assert!(out.contains("billing"), "got: {out}");
+    }
+
+    #[test]
+    fn conformance_bails_when_projection_absent() {
+        use crate::adapters::store::Workspace;
+        let dir = tempfile::tempdir().unwrap();
+        let ws = Workspace::new(dir.path());
+        ws.save_config(&crate::model::config::Config::default())
+            .unwrap();
+        let err = conformance(&ws, &ws, "checkout", dir.path()).unwrap_err();
         assert!(
             err.to_string().contains("no projection for checkout"),
             "got: {err}"

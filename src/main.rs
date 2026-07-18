@@ -94,6 +94,13 @@ enum Command {
         #[command(subcommand)]
         command: ProjectionCommand,
     },
+    /// Check code against a spec's approved system projection
+    Conformance {
+        /// Spec id whose projection to check against
+        spec: String,
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -245,6 +252,7 @@ fn main() -> Result<()> {
         Command::Flow { session, all, path } => run_flow(session.as_deref(), all, &path),
         Command::Board { spec, path } => run_board(&spec, &path),
         Command::Projection { command } => run_projection(command),
+        Command::Conformance { spec, path } => run_conformance(&spec, &path),
     }
 }
 
@@ -329,6 +337,18 @@ fn run_projection(command: ProjectionCommand) -> Result<()> {
             Ok(())
         }
     }
+}
+
+fn run_conformance(spec: &str, path: &Path) -> Result<()> {
+    let ws = Workspace::new(path);
+    require_initialized(&ws)?;
+    let c = circuit::app::conformance(&ws, &ws, spec, path)?;
+    print!("{}", circuit::app::render_conformance(&c));
+    // A broken contract fails the command (gates CI); uncovered is only a warning.
+    if !c.violations.is_empty() {
+        std::process::exit(1);
+    }
+    Ok(())
 }
 
 fn run_dag(command: DagCommand) -> Result<()> {
