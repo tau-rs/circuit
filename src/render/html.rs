@@ -80,7 +80,11 @@ pub fn render(
             (
                 sel.clone(),
                 OverlayView {
-                    nodes: ov.modules.iter().map(|&id| g.name(id).to_string()).collect(),
+                    nodes: ov
+                        .modules
+                        .iter()
+                        .map(|&id| g.name(id).to_string())
+                        .collect(),
                     edges: ov.edges.clone(),
                 },
             )
@@ -138,13 +142,25 @@ mod tests {
         let lg = layered(&g);
         let decls = vec![(
             "app".to_string(),
-            FnDecl { name: "run".into(), is_pub: true, is_test: false, is_main: false, calls: vec![] },
+            FnDecl {
+                name: "run".into(),
+                is_pub: true,
+                is_test: false,
+                is_main: false,
+                calls: vec![],
+            },
         )];
         let calls = CallGraph::build(&decls);
         let ov = overlay(&g, &calls, "app::run", &lg);
         let files = BTreeMap::new();
 
-        let out = render(&g, &lg, &[("app::run".to_string(), ov)], &files, Some("app::run"));
+        let out = render(
+            &g,
+            &lg,
+            &[("app::run".to_string(), ov)],
+            &files,
+            Some("app::run"),
+        );
 
         assert!(out.contains("\"overlays\":{\"app::run\""));
         assert!(out.contains("\"initial\":\"app::run\""));
