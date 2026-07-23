@@ -16,6 +16,7 @@
 - `analyze`, `map` (text), and `map --mermaid` output must stay byte-for-byte unchanged.
 - Final gate (owned by Task 4): `cargo test`, `cargo clippy --all-targets -- -D warnings`, and `cargo fmt --check` all clean. Clippy/fmt run **once** at the final task, not per task.
 - HTML is emitted to **stdout** (user redirects to a file). `--html` `conflicts_with` `--mermaid`.
+- **Untrusted input:** module/file names come from the *analyzed* repo and are rendered into HTML. Never build DOM via `innerHTML` string interpolation — use `textContent`/`createElement`. Escape `<`/`>` in the embedded JSON so a name containing `</script>` cannot break out of the inline `<script>` block.
 - Module-identity invariant (carried from #18): a `CallGraph` node's `module` string equals its `ArchGraph` node name and the `files`-map key (all from `lang::module_name_from_rel`).
 
 ---
@@ -300,10 +301,20 @@ function layerOf(name) {
   for (const c of DATA.columns) if (c.modules.includes(name)) return c.layer;
   return '';
 }
+// Names/paths come from the analyzed repo (untrusted). Build the DOM with
+// textContent/createElement — never innerHTML string interpolation.
 function showTip(ev, name) {
   const fs = filesOf(name);
-  tip.innerHTML = `<b>${name}</b> · ${layerOf(name)}` +
-    fs.map((f) => `<span class="f">${f}</span>`).join('');
+  tip.replaceChildren();
+  const b = document.createElement('b');
+  b.textContent = name;
+  tip.append(b, document.createTextNode(' · ' + layerOf(name)));
+  for (const f of fs) {
+    const s = document.createElement('span');
+    s.className = 'f';
+    s.textContent = f;
+    tip.appendChild(s);
+  }
   tip.style.display = 'block';
   tip.style.left = (ev.clientX + 12) + 'px';
   tip.style.top = (ev.clientY + 12) + 'px';
@@ -313,9 +324,26 @@ const panel = document.getElementById('panel'), pbody = document.getElementById(
 document.getElementById('pclose').onclick = () => { panel.style.display = 'none'; };
 function pin(name) {
   const fs = filesOf(name);
-  pbody.innerHTML = `<h2>${name}</h2><div class="k">${layerOf(name)}</div>` +
-    (fs.length ? fs.map((f) => `<div class="path">${f}</div>`).join('')
-               : '<div class="k">no files</div>');
+  pbody.replaceChildren();
+  const h = document.createElement('h2');
+  h.textContent = name;
+  const k = document.createElement('div');
+  k.className = 'k';
+  k.textContent = layerOf(name);
+  pbody.append(h, k);
+  if (fs.length) {
+    for (const f of fs) {
+      const d = document.createElement('div');
+      d.className = 'path';
+      d.textContent = f;
+      pbody.appendChild(d);
+    }
+  } else {
+    const d = document.createElement('div');
+    d.className = 'k';
+    d.textContent = 'no files';
+    pbody.appendChild(d);
+  }
   panel.style.display = 'block';
 }
 
@@ -436,6 +464,20 @@ mod tests {
         assert!(out.contains("\"overlays\":{\"app::run\""));
         assert!(out.contains("\"initial\":\"app::run\""));
     }
+
+    #[test]
+    fn render_escapes_angle_brackets_to_prevent_script_breakout() {
+        let mut g = ArchGraph::new();
+        g.ensure_module("</script><img>");
+        let lg = layered(&g);
+        let files = BTreeMap::new();
+
+        let out = render(&g, &lg, &[], &files, None);
+
+        // A hostile module/file name must not terminate the inline <script>.
+        assert!(!out.contains("</script><img>"));
+        assert!(out.contains("\\u003c/script\\u003e\\u003cimg\\u003e"));
+    }
 }
 ```
 
@@ -537,7 +579,12 @@ pub fn render(
         initial: initial.map(|s| s.to_string()),
     };
 
-    let json = serde_json::to_string(&view).expect("MapView is always serializable");
+    // Escape angle brackets so a module/file name containing "</script>" cannot
+    // break out of the inline <script> block that embeds this JSON payload.
+    let json = serde_json::to_string(&view)
+        .expect("MapView is always serializable")
+        .replace('<', "\\u003c")
+        .replace('>', "\\u003e");
     TEMPLATE.replace("__CIRCUIT_DATA__", &json)
 }
 ```
