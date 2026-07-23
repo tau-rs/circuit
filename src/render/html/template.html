@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Circuit — Layered Map</title>
+<style>
+  :root {
+    --bg:#0f1115; --panel:#171a21; --ink:#e6e9ef; --muted:#9aa4b2;
+    --line:#3a4150; --node:#1f2530; --node-br:#3a4150;
+    --inward:#4f8cff; --outward:#ff5c5c; --lateral:#b28cff;
+    --lit:#ffd257; --lit-bg:#2a2410;
+  }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--ink);
+    font:14px/1.4 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  #bar { display:flex; align-items:center; gap:12px; padding:10px 14px;
+    border-bottom:1px solid var(--line); background:var(--panel); }
+  #bar h1 { font-size:14px; font-weight:600; margin:0; letter-spacing:.02em; }
+  #bar .sp { flex:1; }
+  select { background:var(--node); color:var(--ink); border:1px solid var(--node-br);
+    border-radius:6px; padding:5px 8px; font:inherit; }
+  #legend { display:flex; gap:14px; color:var(--muted); font-size:12px; }
+  #legend i { display:inline-block; width:22px; height:0; border-top:2px solid;
+    vertical-align:middle; margin-right:5px; }
+  #stage { position:absolute; inset:52px 0 0 0; }
+  svg { width:100%; height:100%; display:block; cursor:grab; }
+  svg.panning { cursor:grabbing; }
+  .node rect { fill:var(--node); stroke:var(--node-br); stroke-width:1.5; }
+  .node text { fill:var(--ink); font-size:13px; }
+  .node.lit rect { stroke:var(--lit); stroke-width:2.5; fill:var(--lit-bg); }
+  .node { cursor:pointer; }
+  .col-label { fill:var(--muted); font-size:12px; font-weight:600;
+    letter-spacing:.08em; text-transform:uppercase; }
+  path.edge { fill:none; stroke:var(--line); stroke-width:1.5; opacity:.55; }
+  path.edge.inward { stroke:var(--inward); }
+  path.edge.outward { stroke:var(--outward); stroke-dasharray:5 3; }
+  path.edge.lateral { stroke:var(--lateral); }
+  path.edge.lit { opacity:1; stroke:var(--lit); stroke-width:2.5; }
+  #tip { position:absolute; pointer-events:none; background:#000c; color:#fff;
+    border:1px solid var(--line); border-radius:6px; padding:6px 9px; font-size:12px;
+    max-width:280px; display:none; z-index:10; }
+  #tip b { color:var(--lit); }
+  #tip .f { color:var(--muted); display:block; margin-top:3px; word-break:break-all; }
+  #panel { position:absolute; right:14px; bottom:14px; width:260px; background:var(--panel);
+    border:1px solid var(--line); border-radius:8px; padding:12px; display:none; z-index:9; }
+  #panel h2 { margin:0 0 6px; font-size:13px; }
+  #panel .k { color:var(--muted); font-size:12px; }
+  #panel .path { font-family:ui-monospace,Menlo,monospace; font-size:12px; color:var(--ink);
+    background:var(--node); border:1px solid var(--node-br); border-radius:5px;
+    padding:4px 6px; margin-top:5px; word-break:break-all; }
+  #panel button { position:absolute; top:8px; right:8px; background:none; border:none;
+    color:var(--muted); cursor:pointer; font-size:14px; }
+</style>
+</head>
+<body>
+<div id="bar">
+  <h1>Circuit · Layered Map</h1>
+  <label>Feature <select id="feat"></select></label>
+  <div class="sp"></div>
+  <div id="legend">
+    <span><i style="border-color:var(--inward)"></i>inward</span>
+    <span><i style="border-color:var(--outward)"></i>violation</span>
+    <span><i style="border-color:var(--lateral)"></i>lateral</span>
+  </div>
+</div>
+<div id="stage">
+  <svg id="svg"><g id="edges"></g><g id="nodes"></g></svg>
+</div>
+<div id="tip"></div>
+<div id="panel"><button id="pclose">✕</button><div id="pbody"></div></div>
+<script>
+const DATA = __CIRCUIT_DATA__;
+
+const COL_W = 240, ROW_H = 64, NODE_W = 168, NODE_H = 40, PAD = 40, HEAD = 34;
+const NS = 'http://www.w3.org/2000/svg';
+const el = (n, a) => { const e = document.createElementNS(NS, n);
+  for (const k in a) e.setAttribute(k, a[k]); return e; };
+
+// layout: position is a pure function of the sorted payload
+const pos = {};
+DATA.columns.forEach((col, ci) => {
+  const x = PAD + ci * COL_W;
+  col.modules.forEach((name, ri) => {
+    const y = PAD + HEAD + ri * ROW_H;
+    pos[name] = { x, y, w: NODE_W, h: NODE_H, cx: x + NODE_W / 2, cy: y + NODE_H / 2 };
+  });
+});
+
+const svg = document.getElementById('svg');
+const gEdges = document.getElementById('edges');
+const gNodes = document.getElementById('nodes');
+
+// arrowhead marker
+const marker = el('marker', { id: 'ah', viewBox: '0 0 10 10', refX: 9, refY: 5,
+  markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse' });
+marker.appendChild(el('path', { d: 'M0 0 L10 5 L0 10 z', fill: '#8b93a1' }));
+const defs = el('defs', {});
+defs.appendChild(marker);
+svg.insertBefore(defs, gEdges);
+
+// column labels
+DATA.columns.forEach((col, ci) => {
+  const t = el('text', { x: PAD + ci * COL_W, y: PAD, class: 'col-label' });
+  t.textContent = col.layer;
+  gNodes.appendChild(t);
+});
+
+// edges
+const edgeEls = DATA.edges.map((e) => {
+  const a = pos[e.from], b = pos[e.to];
+  if (!a || !b) return null;
+  const rightward = b.cx >= a.cx;
+  const sx = rightward ? a.x + a.w : a.x, ex = rightward ? b.x : b.x + b.w;
+  const dx = Math.max(30, Math.abs(ex - sx) / 2);
+  const c1 = sx + (rightward ? dx : -dx), c2 = ex + (rightward ? -dx : dx);
+  const p = el('path', { class: 'edge ' + e.dir,
+    d: `M${sx} ${a.cy} C${c1} ${a.cy} ${c2} ${b.cy} ${ex} ${b.cy}`,
+    'marker-end': 'url(#ah)' });
+  gEdges.appendChild(p);
+  return p;
+});
+
+// nodes
+const nodeEls = {};
+for (const name in pos) {
+  const p = pos[name];
+  const g = el('g', { class: 'node', 'data-name': name });
+  g.appendChild(el('rect', { x: p.x, y: p.y, width: p.w, height: p.h, rx: 7 }));
+  const t = el('text', { x: p.cx, y: p.cy + 4, 'text-anchor': 'middle' });
+  t.textContent = name;
+  g.appendChild(t);
+  g.addEventListener('mousemove', (ev) => showTip(ev, name));
+  g.addEventListener('mouseleave', hideTip);
+  g.addEventListener('click', () => pin(name));
+  gNodes.appendChild(g);
+  nodeEls[name] = g;
+}
+
+// tooltip + detail panel
+const tip = document.getElementById('tip');
+const filesOf = (name) => DATA.files[name] || [];
+function layerOf(name) {
+  for (const c of DATA.columns) if (c.modules.includes(name)) return c.layer;
+  return '';
+}
+function showTip(ev, name) {
+  const fs = filesOf(name);
+  tip.innerHTML = `<b>${name}</b> · ${layerOf(name)}` +
+    fs.map((f) => `<span class="f">${f}</span>`).join('');
+  tip.style.display = 'block';
+  tip.style.left = (ev.clientX + 12) + 'px';
+  tip.style.top = (ev.clientY + 12) + 'px';
+}
+function hideTip() { tip.style.display = 'none'; }
+const panel = document.getElementById('panel'), pbody = document.getElementById('pbody');
+document.getElementById('pclose').onclick = () => { panel.style.display = 'none'; };
+function pin(name) {
+  const fs = filesOf(name);
+  pbody.innerHTML = `<h2>${name}</h2><div class="k">${layerOf(name)}</div>` +
+    (fs.length ? fs.map((f) => `<div class="path">${f}</div>`).join('')
+               : '<div class="k">no files</div>');
+  panel.style.display = 'block';
+}
+
+// click-to-light
+const feat = document.getElementById('feat');
+feat.appendChild(new Option('— none —', ''));
+Object.keys(DATA.overlays).sort().forEach((sel) => feat.appendChild(new Option(sel, sel)));
+function light(sel) {
+  for (const n in nodeEls) nodeEls[n].classList.remove('lit');
+  edgeEls.forEach((e) => e && e.classList.remove('lit'));
+  const ov = DATA.overlays[sel];
+  if (!ov) return;
+  ov.nodes.forEach((n) => nodeEls[n] && nodeEls[n].classList.add('lit'));
+  ov.edges.forEach((i) => edgeEls[i] && edgeEls[i].classList.add('lit'));
+}
+feat.addEventListener('change', () => light(feat.value));
+if (DATA.initial) { feat.value = DATA.initial; light(DATA.initial); }
+
+// pan / zoom via viewBox
+let vb;
+function fitView() {
+  let maxX = 400, maxY = 300;
+  for (const n in pos) {
+    maxX = Math.max(maxX, pos[n].x + pos[n].w + PAD);
+    maxY = Math.max(maxY, pos[n].y + pos[n].h + PAD);
+  }
+  vb = { x: 0, y: 0, w: maxX, h: maxY };
+  applyVB();
+}
+function applyVB() { svg.setAttribute('viewBox', `${vb.x} ${vb.y} ${vb.w} ${vb.h}`); }
+fitView();
+
+svg.addEventListener('wheel', (ev) => {
+  ev.preventDefault();
+  const r = svg.getBoundingClientRect();
+  const mx = vb.x + (ev.clientX - r.left) / r.width * vb.w;
+  const my = vb.y + (ev.clientY - r.top) / r.height * vb.h;
+  const k = ev.deltaY > 0 ? 1.1 : 0.9;
+  vb.x = mx - (mx - vb.x) * k; vb.y = my - (my - vb.y) * k;
+  vb.w *= k; vb.h *= k; applyVB();
+}, { passive: false });
+
+let drag = null;
+svg.addEventListener('mousedown', (ev) => {
+  drag = { x: ev.clientX, y: ev.clientY }; svg.classList.add('panning');
+});
+window.addEventListener('mouseup', () => { drag = null; svg.classList.remove('panning'); });
+window.addEventListener('mousemove', (ev) => {
+  if (!drag) return;
+  const r = svg.getBoundingClientRect();
+  vb.x -= (ev.clientX - drag.x) / r.width * vb.w;
+  vb.y -= (ev.clientY - drag.y) / r.height * vb.h;
+  drag.x = ev.clientX; drag.y = ev.clientY; applyVB();
+});
+</script>
+</body>
+</html>
