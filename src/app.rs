@@ -794,14 +794,25 @@ pub fn map_html(path: &std::path::Path, feature: Option<&str>) -> anyhow::Result
     let decls = crate::comprehension::scan::scan_functions(path)?;
     let calls = crate::comprehension::callgraph::CallGraph::build(&decls);
 
+    // Catalog = Main + Public entries, ordered main-first then pub, name-sorted
+    // within each kind (spec §4). `comprehend().groups` is already name-sorted,
+    // so a stable sort by kind rank yields that order.
     let comp = crate::comprehension::comprehend(&decls);
-    let mut overlays: Vec<(String, crate::comprehension::layered::FeatureOverlay)> = Vec::new();
+    let mut ranked: Vec<(u8, String, crate::comprehension::layered::FeatureOverlay)> = Vec::new();
     for grp in &comp.groups {
-        if matches!(grp.kind, EntryKind::Main | EntryKind::Public) {
-            let ov = crate::comprehension::layered::overlay(&graph, &calls, &grp.entry, &lg);
-            overlays.push((grp.entry.clone(), ov));
-        }
+        let rank = match grp.kind {
+            EntryKind::Main => 0u8,
+            EntryKind::Public => 1u8,
+            EntryKind::Test => continue,
+        };
+        let ov = crate::comprehension::layered::overlay(&graph, &calls, &grp.entry, &lg);
+        ranked.push((rank, grp.entry.clone(), ov));
     }
+    ranked.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+    let overlays: Vec<(String, crate::comprehension::layered::FeatureOverlay)> = ranked
+        .into_iter()
+        .map(|(_, entry, ov)| (entry, ov))
+        .collect();
 
     let files = crate::builder::module_files(path)?;
     let initial = feature.filter(|f| overlays.iter().any(|(sel, _)| sel == f));
@@ -994,6 +1005,14 @@ mod tests {
         assert!(out.contains("Adapter"));
         assert!(out.contains("\"overlays\""));
         assert!(!out.contains("__CIRCUIT_DATA__"));
+    }
+
+    #[test]
+    fn map_html_orders_catalog_main_entry_first() {
+        // Circuit's own `fn main` is the sole Main entry, so it must lead the
+        // catalog ahead of every pub entry (spec §4 ordering).
+        let out = map_html(std::path::Path::new("."), None).unwrap();
+        assert!(out.contains("\"catalog\":[\"root::main\""));
     }
 
     #[test]

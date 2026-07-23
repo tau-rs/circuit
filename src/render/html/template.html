@@ -193,7 +193,8 @@ function pin(name) {
 // click-to-light
 const feat = document.getElementById('feat');
 feat.appendChild(new Option('— none —', ''));
-Object.keys(DATA.overlays).sort().forEach((sel) => feat.appendChild(new Option(sel, sel)));
+// DATA.catalog is pre-ordered (main-first, then pub, name-sorted within kind).
+DATA.catalog.forEach((sel) => feat.appendChild(new Option(sel, sel)));
 function light(sel) {
   for (const n in nodeEls) nodeEls[n].classList.remove('lit');
   edgeEls.forEach((e) => e && e.classList.remove('lit'));

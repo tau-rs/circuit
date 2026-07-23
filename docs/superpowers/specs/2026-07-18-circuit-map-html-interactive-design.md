@@ -97,6 +97,7 @@ is a `BTreeMap` and every list is pre-sorted, so the payload is byte-stable.
     { "from": "cli",    "to": "app", "dir": "inward" },
     { "from": "render", "to": "app", "dir": "outward" }
   ],
+  "catalog": ["root::main", "app::run"],
   "overlays": {
     "root::main": { "nodes": ["app", "cli", "comprehension"], "edges": [0, 3] }
   },
@@ -111,6 +112,9 @@ is a `BTreeMap` and every list is pre-sorted, so the payload is byte-stable.
 - `columns` — fixed outside-in order; empty columns retained (rendered as an empty column slot).
 - `edges` — sorted by `(from, to)`; `dir ∈ {inward, outward, lateral, unranked}` (outward = the
   dependency-rule violation `analyze` flags; styled distinctly, e.g. red).
+- `catalog` — the dropdown order: Main entries first, then Public, name-sorted within each kind
+  (§4). A JSON object cannot carry a custom key order, so the ordered selector list is emitted
+  separately; the dropdown iterates `catalog`, not `Object.keys(overlays)`.
 - `overlays` — keyed by catalog selector; `nodes` are module names, `edges` are indices into the
   top-level `edges` array (so JS can light both endpoints and the connector).
 - `files` — module → sorted relative `.rs` paths.

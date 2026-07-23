@@ -30,6 +30,10 @@ struct OverlayView {
 struct MapView<'a> {
     columns: Vec<ColView<'a>>,
     edges: Vec<EdgeView<'a>>,
+    /// Selectors in the order the dropdown should list them (main-first, then
+    /// pub, name-sorted within kind — set by the caller). `overlays` is keyed
+    /// for lookup and cannot carry this order, so it is emitted separately.
+    catalog: Vec<&'a str>,
     overlays: BTreeMap<String, OverlayView>,
     files: &'a BTreeMap<String, Vec<String>>,
     initial: Option<String>,
@@ -91,9 +95,12 @@ pub fn render(
         })
         .collect();
 
+    let catalog: Vec<&str> = overlays.iter().map(|(sel, _)| sel.as_str()).collect();
+
     let view = MapView {
         columns,
         edges,
+        catalog,
         overlays: overlays_map,
         files,
         initial: initial.map(|s| s.to_string()),
@@ -178,5 +185,24 @@ mod tests {
         // A hostile module/file name must not terminate the inline <script>.
         assert!(!out.contains("</script><img>"));
         assert!(out.contains("\\u003c/script\\u003e\\u003cimg\\u003e"));
+    }
+
+    #[test]
+    fn render_emits_catalog_in_given_order_not_alphabetical() {
+        let mut g = ArchGraph::new();
+        g.ensure_module("m");
+        let lg = layered(&g);
+        // Caller supplies main-first (deliberately non-alphabetical) order.
+        let ov = FeatureOverlay::default();
+        let overlays = vec![
+            ("m::zmain".to_string(), ov.clone()),
+            ("m::apublic".to_string(), ov),
+        ];
+        let files = BTreeMap::new();
+
+        let out = render(&g, &lg, &overlays, &files, None);
+
+        // catalog preserves the caller's order; it is NOT re-sorted alphabetically.
+        assert!(out.contains("\"catalog\":[\"m::zmain\",\"m::apublic\"]"));
     }
 }
