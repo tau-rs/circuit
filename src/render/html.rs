@@ -95,7 +95,12 @@ pub fn render(
         initial: initial.map(|s| s.to_string()),
     };
 
-    let json = serde_json::to_string(&view).expect("MapView is always serializable");
+    // Escape angle brackets so a module/file name containing "</script>" cannot
+    // break out of the inline <script> block that embeds this JSON payload.
+    let json = serde_json::to_string(&view)
+        .expect("MapView is always serializable")
+        .replace('<', "\\u003c")
+        .replace('>', "\\u003e");
     TEMPLATE.replace("__CIRCUIT_DATA__", &json)
 }
 
@@ -143,5 +148,19 @@ mod tests {
 
         assert!(out.contains("\"overlays\":{\"app::run\""));
         assert!(out.contains("\"initial\":\"app::run\""));
+    }
+
+    #[test]
+    fn render_escapes_angle_brackets_to_prevent_script_breakout() {
+        let mut g = ArchGraph::new();
+        g.ensure_module("</script><img>");
+        let lg = layered(&g);
+        let files = BTreeMap::new();
+
+        let out = render(&g, &lg, &[], &files, None);
+
+        // A hostile module/file name must not terminate the inline <script>.
+        assert!(!out.contains("</script><img>"));
+        assert!(out.contains("\\u003c/script\\u003e\\u003cimg\\u003e"));
     }
 }

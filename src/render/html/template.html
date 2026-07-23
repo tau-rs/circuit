@@ -144,10 +144,20 @@ function layerOf(name) {
   for (const c of DATA.columns) if (c.modules.includes(name)) return c.layer;
   return '';
 }
+// Names/paths come from the analyzed repo (untrusted). Build the DOM with
+// textContent/createElement — never innerHTML string interpolation.
 function showTip(ev, name) {
   const fs = filesOf(name);
-  tip.innerHTML = `<b>${name}</b> · ${layerOf(name)}` +
-    fs.map((f) => `<span class="f">${f}</span>`).join('');
+  tip.replaceChildren();
+  const b = document.createElement('b');
+  b.textContent = name;
+  tip.append(b, document.createTextNode(' · ' + layerOf(name)));
+  for (const f of fs) {
+    const s = document.createElement('span');
+    s.className = 'f';
+    s.textContent = f;
+    tip.appendChild(s);
+  }
   tip.style.display = 'block';
   tip.style.left = (ev.clientX + 12) + 'px';
   tip.style.top = (ev.clientY + 12) + 'px';
@@ -157,9 +167,26 @@ const panel = document.getElementById('panel'), pbody = document.getElementById(
 document.getElementById('pclose').onclick = () => { panel.style.display = 'none'; };
 function pin(name) {
   const fs = filesOf(name);
-  pbody.innerHTML = `<h2>${name}</h2><div class="k">${layerOf(name)}</div>` +
-    (fs.length ? fs.map((f) => `<div class="path">${f}</div>`).join('')
-               : '<div class="k">no files</div>');
+  pbody.replaceChildren();
+  const h = document.createElement('h2');
+  h.textContent = name;
+  const k = document.createElement('div');
+  k.className = 'k';
+  k.textContent = layerOf(name);
+  pbody.append(h, k);
+  if (fs.length) {
+    for (const f of fs) {
+      const d = document.createElement('div');
+      d.className = 'path';
+      d.textContent = f;
+      pbody.appendChild(d);
+    }
+  } else {
+    const d = document.createElement('div');
+    d.className = 'k';
+    d.textContent = 'no files';
+    pbody.appendChild(d);
+  }
   panel.style.display = 'block';
 }
 
