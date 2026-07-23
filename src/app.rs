@@ -826,6 +826,35 @@ pub fn map(path: &std::path::Path, feature: Option<&str>, mermaid: bool) -> anyh
     }
 }
 
+/// Interactive HTML layered map (deterministic, no LLM): hydrates the same
+/// `LayeredGraph` as `map`, plus a precomputed overlay per Main/Public entry
+/// point (the click-to-light catalog) and a module→file map for drill-to-file.
+/// `feature` pre-lights that selector on load when it matches a catalog entry.
+pub fn map_html(path: &std::path::Path, feature: Option<&str>) -> anyhow::Result<String> {
+    use crate::comprehension::EntryKind;
+
+    let graph = crate::builder::build_graph(path)?;
+    let lg = crate::comprehension::layered::layered(&graph);
+    let decls = crate::comprehension::scan::scan_functions(path)?;
+    let calls = crate::comprehension::callgraph::CallGraph::build(&decls);
+
+    let comp = crate::comprehension::comprehend(&decls);
+    let mut overlays: Vec<(String, crate::comprehension::layered::FeatureOverlay)> = Vec::new();
+    for grp in &comp.groups {
+        if matches!(grp.kind, EntryKind::Main | EntryKind::Public) {
+            let ov = crate::comprehension::layered::overlay(&graph, &calls, &grp.entry, &lg);
+            overlays.push((grp.entry.clone(), ov));
+        }
+    }
+
+    let files = crate::builder::module_files(path)?;
+    let initial = feature.filter(|f| overlays.iter().any(|(sel, _)| sel == f));
+
+    Ok(crate::render::html::render(
+        &graph, &lg, &overlays, &files, initial,
+    ))
+}
+
 /// Structural impact / blast radius (deterministic, no LLM): the dependents
 /// and dependencies cones of a target function, ranked by hop distance.
 pub fn impact(
@@ -1000,6 +1029,15 @@ mod tests {
         let out = map(std::path::Path::new("."), None, false).unwrap();
         assert!(out.contains("layers (inward →)"));
         assert!(out.contains("edges:"));
+    }
+
+    #[test]
+    fn map_html_self_emits_document_with_overlays() {
+        let out = map_html(std::path::Path::new("."), None).unwrap();
+        assert!(out.starts_with("<!DOCTYPE html>"));
+        assert!(out.contains("Adapter"));
+        assert!(out.contains("\"overlays\""));
+        assert!(!out.contains("__CIRCUIT_DATA__"));
     }
 
     #[test]

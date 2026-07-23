@@ -51,6 +51,9 @@ enum Command {
         /// Emit mermaid export instead of text
         #[arg(long)]
         mermaid: bool,
+        /// Emit a self-contained interactive HTML document (to stdout)
+        #[arg(long, conflicts_with = "mermaid")]
+        html: bool,
     },
     /// Scaffold the `.circuit/` authored data model in the current repo
     Init {
@@ -244,7 +247,8 @@ fn main() -> Result<()> {
             path,
             feature,
             mermaid,
-        } => run_map(&path, feature.as_deref(), mermaid),
+            html,
+        } => run_map(&path, feature.as_deref(), mermaid, html),
         Command::Init { path } => run_init(&path),
         Command::Spec { command } => run_spec(command),
         Command::Dag { command } => run_dag(command),
@@ -271,8 +275,12 @@ fn run_impact(target: &str, path: &Path, max_depth: Option<u32>) -> Result<()> {
     Ok(())
 }
 
-fn run_map(path: &Path, feature: Option<&str>, mermaid: bool) -> Result<()> {
-    println!("{}", circuit::app::map(path, feature, mermaid)?);
+fn run_map(path: &Path, feature: Option<&str>, mermaid: bool, html: bool) -> Result<()> {
+    if html {
+        println!("{}", circuit::app::map_html(path, feature)?);
+    } else {
+        println!("{}", circuit::app::map(path, feature, mermaid)?);
+    }
     Ok(())
 }
 

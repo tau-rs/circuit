@@ -65,6 +65,41 @@ fn map_mermaid_exports_flowchart() {
 }
 
 #[test]
+fn map_html_emits_self_contained_document() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("src");
+    std::fs::create_dir_all(src.join("app")).unwrap();
+    std::fs::write(
+        src.join("main.rs"),
+        "use crate::app::run;\nfn main() { run(); }",
+    )
+    .unwrap();
+    std::fs::write(src.join("app/mod.rs"), "pub fn run() {}").unwrap();
+
+    Command::cargo_bin("circuit")
+        .unwrap()
+        .arg("map")
+        .arg(dir.path())
+        .arg("--html")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("<!DOCTYPE html>"))
+        .stdout(predicate::str::contains("__CIRCUIT_DATA__").not());
+}
+
+#[test]
+fn map_html_conflicts_with_mermaid() {
+    Command::cargo_bin("circuit")
+        .unwrap()
+        .arg("map")
+        .arg(".")
+        .arg("--html")
+        .arg("--mermaid")
+        .assert()
+        .failure();
+}
+
+#[test]
 fn analyze_reports_indicators_and_mermaid() {
     let dir = tempfile::tempdir().unwrap();
     let src = dir.path().join("src");
