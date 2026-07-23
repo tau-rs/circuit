@@ -1,3 +1,4 @@
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use anyhow::Result;
@@ -53,6 +54,39 @@ pub fn build_graph(root: &Path) -> Result<ArchGraph> {
     Ok(build_graph_from_sources(&sources))
 }
 
+/// IO adapter: map each module name to the sorted, deduped relative `.rs`
+/// paths that contribute to it. Mirrors `build_graph`'s walk; used by the
+/// interactive HTML map for drill-to-file. Keys/values are deterministic.
+pub fn module_files(root: &Path) -> Result<BTreeMap<String, Vec<String>>> {
+    if !root.exists() {
+        anyhow::bail!("path not found: {}", root.display());
+    }
+    let src_root = root.join("src");
+    let base = if src_root.is_dir() {
+        src_root
+    } else {
+        root.to_path_buf()
+    };
+
+    let mut map: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for entry in WalkDir::new(&base).into_iter().filter_map(|e| e.ok()) {
+        let p = entry.path();
+        if p.extension().and_then(|e| e.to_str()) == Some("rs") {
+            let rel = p
+                .strip_prefix(&base)
+                .unwrap_or(p)
+                .to_string_lossy()
+                .replace('\\', "/");
+            let module = module_name_from_rel(&rel);
+            map.entry(module).or_default().insert(rel);
+        }
+    }
+    Ok(map
+        .into_iter()
+        .map(|(k, v)| (k, v.into_iter().collect()))
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -90,5 +124,24 @@ mod tests {
     fn missing_path_is_an_error() {
         let result = build_graph(std::path::Path::new("/no/such/circuit/path/xyz"));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn module_files_maps_modules_to_sorted_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("src");
+        std::fs::create_dir_all(src.join("app")).unwrap();
+        std::fs::write(src.join("main.rs"), "fn main() {}").unwrap();
+        std::fs::write(src.join("app/mod.rs"), "pub fn run() {}").unwrap();
+
+        let m = module_files(dir.path()).unwrap();
+
+        assert_eq!(m.get("root").unwrap(), &vec!["main.rs".to_string()]);
+        assert_eq!(m.get("app").unwrap(), &vec!["app/mod.rs".to_string()]);
+    }
+
+    #[test]
+    fn module_files_missing_path_is_an_error() {
+        assert!(module_files(std::path::Path::new("/no/such/circuit/xyz")).is_err());
     }
 }
